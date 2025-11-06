@@ -15,9 +15,7 @@ from transformers.data.data_collator import pad_without_fast_tokenizer_warning
 
 
 def get_dataset(path, tokenizer, max_size=1000000000):
-
     def tokenize_sample(sample):
-
         question_tokenized = tokenizer.encode(
             sample["question"] + "\n", add_special_tokens=True
         )
@@ -78,13 +76,11 @@ def get_dataset(path, tokenizer, max_size=1000000000):
 
 @dataclass
 class MyCollator:
-
     tokenizer: PreTrainedTokenizerBase
     latent_id: Optional[int] = None
     label_pad_token_id: Optional[int] = -100
 
     def __call__(self, features, return_tensors=None):
-
         assert self.tokenizer.padding_side == "right"
 
         """
@@ -194,9 +190,7 @@ def get_question_latent_dataset(
     end_id,
     no_special_marker=False,
 ):
-
     def process_dataset(sample):
-
         if configs.pad_latent_to_max:
             max_latent_stage = configs.max_latent_stage
         else:
@@ -237,11 +231,9 @@ def get_cot_latent_dataset(
     no_special_marker=False,
     shuffle=False,
 ):
-
     n_additional_tokens = 0 if no_special_marker else 2
 
     def process_dataset(sample):
-
         if (
             random.random() < configs.uniform_prob
         ):  # with some prob, randomly sample stage
@@ -274,28 +266,40 @@ def get_cot_latent_dataset(
 
         tokens = (
             sample["question_tokenized"]
+            + (
+                list(
+                    itertools.chain.from_iterable(
+                        sample["steps_tokenized"][:-n_skip_steps]
+                    )
+                )
+                if configs.reversed
+                else []
+            )
             + ([] if no_special_marker else [start_id])
             + [latent_id] * n_latent_tokens
             + ([] if no_special_marker else [end_id])
-            + list(
-                itertools.chain.from_iterable(sample["steps_tokenized"][n_skip_steps:])
+            + (
+                list(
+                    itertools.chain.from_iterable(
+                        sample["steps_tokenized"][n_skip_steps:]
+                    )
+                )
+                if (not configs.reversed)
+                else []
             )
             + sample["answer_tokenized"]
         )
+        labels = [-100] * len(sample["question_tokenized"]) + tokens[
+            len(sample["question_tokenized"]) :
+        ]
+        labels = [
+            -100 if token in [start_id, latent_id, end_id] else token
+            for token in tokens
+        ]
 
         return {
             "input_ids": tokens,
-            "labels": [-100]
-            * (
-                len(sample["question_tokenized"])
-                + n_latent_tokens
-                + n_additional_tokens
-            )
-            + tokens[
-                n_latent_tokens
-                + n_additional_tokens
-                + len(sample["question_tokenized"]) :
-            ],
+            "labels": labels,
             "attention_mask": [1] * len(tokens),
             "idx": sample["idx"],
             "position_ids": list(range(len(tokens))),
