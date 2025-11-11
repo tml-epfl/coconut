@@ -178,7 +178,7 @@ def generate_query_from_dag(
     pairs = [(a, b) for a in dag.layer_map[0] for b in dag.nodes if dag.layers[b] != 0]
     random.shuffle(pairs)
 
-    for (a, b) in pairs:
+    for a, b in pairs:
         try:
             # generate the path
             paths = dag.get_paths_between(a, b)
@@ -186,12 +186,16 @@ def generate_query_from_dag(
 
             # turn into query
             a, b, c = path[0], path[-1], -1
-            index = random.randint(
-                0, len(dag.nodes) - len(dag.get_descendants(a)) - len(dag.layer_map[0]) - 2
-            )
             descendants = dag.get_descendants(a)
+
+            index = random.randint(
+                0,
+                len(dag.nodes) - len(descendants) - len(dag.layer_map[0]) - 2,
+            )
+            assert index >= 0
+
             while index > 0 or c == -1:
-                while (c in descendants) or (dag.layers[c] == 0) or c == b:
+                while (c in descendants) or (dag.layers[c] == 0) or c == b or c == -1:
                     c += 1
                 index -= 1
 
@@ -225,7 +229,9 @@ def generate_query_from_dag(
                     )
                 )
 
-            answer = answer_format.replace("{#1}", entities[a]).replace("{#2}", entities[b])
+            answer = answer_format.replace("{#1}", entities[a]).replace(
+                "{#2}", entities[b]
+            )
 
             return context, question, chain, answer
         except Exception as e:
@@ -234,12 +240,17 @@ def generate_query_from_dag(
                 traceback.print_exc()
     return None
 
-def sample_names_for_dag(dag: DAG, names: Union[str, List[str]], entities: Union[str, List[str]],) -> List[str]:
+
+def sample_names_for_dag(
+    dag: DAG,
+    names: Union[str, List[str]],
+    entities: Union[str, List[str]],
+) -> List[str]:
     if isinstance(names, str):
-        with open(names, 'r') as file:
+        with open(names, "r") as file:
             names = file.readlines()
     if isinstance(entities, str):
-        with open(entities, 'r') as file:
+        with open(entities, "r") as file:
             entities = file.readlines()
 
     n_root = len(dag.layer_map[0])
@@ -253,14 +264,15 @@ def sample_names_for_dag(dag: DAG, names: Union[str, List[str]], entities: Union
         for j in range(len(dag.layer_map[i])):
             result[dag.layer_map[i][j]] = entities[ind]
             ind += 1
-    
+
     return result
 
+
 def get_names_and_entities(file: str) -> None:
-    with open(file, 'r') as file:
+    with open(file, "r") as file:
         # Load the JSON data from the file
         data = json.load(file)
-    
+
     names, entities = set(), set()
     for query in data:
         symbols = query["idx_to_symbol"]
@@ -268,7 +280,7 @@ def get_names_and_entities(file: str) -> None:
         entities.update([symbol for symbol in symbols if (not symbol[0].isupper())])
     names, entities = list(names), list(entities)
 
-    with open('names.txt', 'w') as f:
-        f.writelines([str(number) + '\n' for number in names])
-    with open('entities.txt', 'w') as f:
-        f.writelines([str(number) + '\n' for number in entities])
+    with open("names.txt", "w") as f:
+        f.writelines([str(number) + "\n" for number in names])
+    with open("entities.txt", "w") as f:
+        f.writelines([str(number) + "\n" for number in entities])

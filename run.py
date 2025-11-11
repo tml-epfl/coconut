@@ -22,6 +22,7 @@ from dataset import (
     get_question_latent_dataset,
     get_cot_latent_dataset,
     MyCollator,
+    OnlineDataset,
 )
 
 from tqdm import tqdm
@@ -193,21 +194,50 @@ def main():
     if rank == 0:
         print(parallel_model)
 
-    # prepare the ground truth answer and cot for evaluation
-    question_val = [d["question"] for d in json.load(open(configs.val_path))]
-    answers_val = [
-        d["answer"].replace(",", "").strip() for d in json.load(open(configs.val_path))
-    ]
-    cot_val = ["\n".join(d["steps"]) for d in json.load(open(configs.val_path))]
+    if configs.data_type == "file":
+        # prepare the ground truth answer and cot for evaluation
+        question_val = [d["question"] for d in json.load(open(configs.val_path))]
+        answers_val = [
+            d["answer"].replace(",", "").strip()
+            for d in json.load(open(configs.val_path))
+        ]
+        cot_val = ["\n".join(d["steps"]) for d in json.load(open(configs.val_path))]
 
-    base_dataset_valid = get_dataset(
-        configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
-    )
-
-    if not configs.only_eval:
-        base_dataset_train = get_dataset(
-            configs.train_path, tokenizer, max_size=5000 if configs.debug else 100000000
+        base_dataset_valid = get_dataset(
+            configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
         )
+
+        if not configs.only_eval:
+            base_dataset_train = get_dataset(
+                configs.train_path,
+                tokenizer,
+                max_size=5000 if configs.debug else 100000000,
+            )
+    elif configs.data_type == "online":
+        configs_valid = configs.dataset.copy()
+        configs_valid["size"] = configs_valid["size"]["valid"]
+        base_dataset_valid = OnlineDataset(tokenizer, **configs_valid)
+
+        # prepare the ground truth answer and cot for evaluation
+        question_val = [
+            base_dataset_valid.raw_data[i]["question"]
+            for i in range(len(base_dataset_valid))
+        ]
+        answers_val = [
+            base_dataset_valid.raw_data[i]["answer"].replace(",", "").strip()
+            for i in range(len(base_dataset_valid))
+        ]
+        cot_val = [
+            "\n".join(base_dataset_valid.raw_data[i]["steps"])
+            for i in range(len(base_dataset_valid))
+        ]
+
+        if not configs.only_eval:
+            configs_train = configs.dataset.copy()
+            configs_train["size"] = configs_train["size"]["valid"]
+            base_dataset_train = OnlineDataset(tokenizer, **configs_train)
+    else:
+        raise ValueError("data_type needs to be in ['file', 'online']")
 
     if "gsm" in configs.val_path:
         max_new_tokens = 64
@@ -239,6 +269,15 @@ def main():
     collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
 
     for epoch in range(configs.resume, configs.num_epochs):
+        if (
+            configs.data_type == "online"
+            and epoch > configs.resume
+        ):
+            if configs.dataset["size"]["valid"]:
+                base_dataset_valid._generate_fixed_dataset()
+            if configs.dataset["size"]["train"]:
+                base_dataset_train._generate_fixed_dataset()
+
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage
         )

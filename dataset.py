@@ -5,13 +5,16 @@ import json
 import itertools
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from datasets import Dataset
+from datasets import Dataset, DatasetInfo, Features, Value, Sequence
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import pad_without_fast_tokenizer_warning
+
+
+from preprocessing.prosqa import DAG, generate_query_from_dag, sample_names_for_dag
 
 
 def get_dataset(path, tokenizer, max_size=1000000000):
@@ -327,3 +330,174 @@ def get_cot_latent_dataset(
         dataset = processed_dataset
 
     return dataset
+
+
+class OnlineDataset(Dataset):
+    names_path = "data/names.txt"
+    entities_path = "data/entities.txt"
+
+    """
+    A Dataset class that generates samples online instead of loading from a file.
+
+    This class can operate in two modes:
+    1. Fixed-size: If a positive `size` is provided, it generates a fixed number of samples
+       at initialization and serves them.
+    2. Dynamic-size: If a negative `size` is provided, it generates a new sample
+       on-the-fly each time an item is requested.
+    """
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        size: int,
+        num_nodes: Tuple[int, int] = [5, 20],
+        num_layers: Tuple[int, int] = [2, 5],
+        connection_prob: float = 0.3,
+    ):
+        """
+        Initializes the OnlineDataset.
+
+        Args:
+            tokenizer (PreTrainedTokenizerBase): The tokenizer for encoding the text.
+            size (int): The size of the dataset. If positive, a fixed dataset is generated.
+                        If negative, samples are generated on-the-fly.
+        """
+        self.tokenizer = tokenizer
+        self.size = abs(size)
+        self.is_dynamic = size < 0
+        self.num_nodes = num_nodes
+        self.num_layers = num_layers
+        self.connection_prob = connection_prob
+
+        with open(OnlineDataset.names_path, "r") as file:
+            self.names = file.readlines()
+        with open(OnlineDataset.entities_path, "r") as file:
+            self.entities = file.readlines()
+
+        if not self.is_dynamic:
+            self._generate_fixed_dataset()
+
+    @property
+    def _info(self):
+        """Specifies the dataset's metadata, including the features."""
+        return DatasetInfo(
+            description="A custom dataset loading from text files.",
+            features=Features({
+            'idx': Value('int32'),
+            'question': Value('string'),
+            'steps': Sequence(Value('string')),
+            'answers': Value('string')
+        }))
+
+
+    def _generate_sample(self, idx: int) -> dict:
+        """
+        Placeholder for the generation of a single data sample.
+
+        This is where you will insert your custom logic to generate a question,
+        its steps, and the final answer.
+
+        Args:
+            idx (int): The index of the sample to generate.
+
+        Returns:
+            dict: A dictionary with "question", "steps", and "answer" keys.
+        """
+        n_nodes = random.randint(self.num_nodes[0], self.num_nodes[1] - 1)
+        n_layers = random.randint(self.num_layers[0], self.num_layers[1] - 1)
+
+        data = None
+        while data is None:
+            dag = DAG.generate_layered_dag(
+                num_nodes=n_nodes,
+                num_layers=n_layers,
+                connection_probability=self.connection_prob,
+            )
+            data = generate_query_from_dag(
+                dag, sample_names_for_dag(dag, self.names, self.entities)
+            )
+
+        context, question, chain, answer = data
+        sample = {
+            "question": context + " " + question,
+            "steps": chain,
+            "answer": answer,
+            "idx": idx,
+        }
+        tokenized_sample = self._tokenize_sample(sample)
+        self._verify_tokenization(sample, tokenized_sample)
+
+        return sample, tokenized_sample
+
+    def _generate_fixed_dataset(self) -> None:
+        """Generates and stores a fixed number of samples."""
+        if torch.cuda.device_count() > 1:
+            if dist.get_rank() == 0:
+                dataset = [[self._generate_sample(i) for i in range(self.size)]]
+            else:
+                dataset = [None]
+            dist.broadcast_object_list(dataset, src=0)
+
+            self.raw_data = [d[0] for d in dataset[0]]
+            self.samples = [d[1] for d in dataset[0]]
+        else:
+            dataset = [self._generate_sample(i) for i in range(self.size)]
+            self.raw_data = [d[0] for d in dataset]
+            self.samples = [d[1] for d in dataset]
+
+    def __len__(self) -> int:
+        """Returns the size of the dataset."""
+        return self.size
+
+    def _tokenize_sample(self, sample: dict) -> dict:
+        """Tokenizes a single data sample."""
+        question_tokenized = self.tokenizer.encode(
+            sample["question"] + "\n", add_special_tokens=True
+        )
+        steps_tokenized = [
+            self.tokenizer.encode(s + "\n", add_special_tokens=False)
+            for s in sample["steps"]
+        ]
+        answer_tokenized = self.tokenizer.encode(
+            "### " + sample["answer"], add_special_tokens=False
+        ) + [self.tokenizer.eos_token_id]
+
+        return {
+            "question_tokenized": question_tokenized,
+            "steps_tokenized": steps_tokenized,
+            "answer_tokenized": answer_tokenized,
+            "idx": sample["idx"],
+        }
+
+    def __getitem__(self, idx: int) -> dict:
+        """
+        Retrieves and tokenizes a single item from the dataset.
+
+        If the dataset is dynamic, a new sample is generated. Otherwise, a
+        pre-generated sample is retrieved. The tokenization is handled
+        correctly in a multi-GPU environment.
+        """
+        if self.is_dynamic:
+            return self._generate_sample(idx)[1]
+        return self.samples[idx]
+
+    def _verify_tokenization(self, original_sample: dict, tokenized_sample: dict):
+        """Verifies the integrity of the tokenization process."""
+        complete_text = (
+            original_sample["question"]
+            + "\n"
+            + "\n".join(original_sample["steps"])
+            + "\n### "
+            + original_sample["answer"]
+        )
+        complete_tokenized = self.tokenizer.encode(
+            complete_text, add_special_tokens=True
+        ) + [self.tokenizer.eos_token_id]
+        reconstructed_tokens = (
+            tokenized_sample["question_tokenized"]
+            + list(itertools.chain.from_iterable(tokenized_sample["steps_tokenized"]))
+            + tokenized_sample["answer_tokenized"]
+        )
+        assert (
+            complete_tokenized == reconstructed_tokens
+        ), "Tokenization verification failed."
