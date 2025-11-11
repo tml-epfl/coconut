@@ -1,8 +1,8 @@
 # need 4 gpus
 
 project: coconut
-save_path: outputs/prosqa/default
-name: prosqa-coconut
+save_path: outputs/prosqa/online
+name: prosqa-coconut-online
 
 only_eval: False
 
@@ -24,8 +24,22 @@ load_model_path: None
 seed: 0
 resume: 0
 bf16: False
-train_path: data/prosqa_train.json
-val_path: data/prosqa_valid.json
+
+# --- dataset --- #
+data_type: online # options: file or online
+dataset: # used for online
+  size:
+    train: 17886
+    valid: 300
+    test: 500
+
+  num_nodes: [5, 20]
+  num_layers: [2, 5]
+  connection_prob: 0.3
+train_path: data/prontoqa_train.json
+val_path: data/prontoqa_valid.json
+
+# --- optimizer --- #
 reset_optimizer: True
 batch_size_training: 32
 debug: False
