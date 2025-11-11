@@ -20,6 +20,14 @@ pad_latent_to_max: True
 save_only_improve: False
 uniform_prob: 0.0
 model_id: openai-community/gpt2
+model_init: scratch
+model_config_overrides:
+  n_layer: 6
+  n_head: 8
+  n_embd: 512
+  resid_pdrop: 0.0
+  embd_pdrop: 0.0
+  attn_pdrop: 0.0
 load_model_path: None
 seed: 0
 resume: 0
@@ -36,8 +44,8 @@ dataset: # used for online
   num_nodes: [5, 20]
   num_layers: [2, 5]
   connection_prob: 0.3
-train_path: data/prontoqa_train.json
-val_path: data/prontoqa_valid.json
+train_path: data/prosqa_train.json
+val_path: data/prosqa_valid.json
 
 # --- optimizer --- #
 reset_optimizer: True

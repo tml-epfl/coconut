@@ -4,7 +4,7 @@
 import torch
 import torch.distributed
 import torch.optim as optim
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import wandb
 
@@ -100,9 +100,30 @@ def main():
             f"Loading from {configs.load_model_path} and skip the first {configs.resume} epochs"
         )
 
-    model = AutoModelForCausalLM.from_pretrained(configs.model_id)
     tokenizer = AutoTokenizer.from_pretrained(configs.model_id)
     tokenizer.pad_token = tokenizer.eos_token
+    model_init = getattr(configs, "model_init", "pretrained")
+    model_config_overrides = getattr(configs, "model_config_overrides", None) or {}
+
+    if model_init not in ["pretrained", "scratch"]:
+        raise ValueError(
+            f"Unsupported model_init option: {model_init}. "
+            "Expected one of ['pretrained', 'scratch']."
+        )
+
+    if model_init == "scratch":
+        model_config = AutoConfig.from_pretrained(configs.model_id)
+        for key, value in model_config_overrides.items():
+            setattr(model_config, key, value)
+        # keep tokenizer and model vocab sizes aligned before extra tokens
+        model_config.vocab_size = len(tokenizer)
+        model = AutoModelForCausalLM.from_config(model_config)
+    else:
+        if model_config_overrides:
+            raise ValueError(
+                "model_config_overrides is only supported when model_init is 'scratch'."
+            )
+        model = AutoModelForCausalLM.from_pretrained(configs.model_id)
     tokenizer.add_tokens("<|start-latent|>")
     tokenizer.add_tokens("<|end-latent|>")
     tokenizer.add_tokens("<|latent|>")
