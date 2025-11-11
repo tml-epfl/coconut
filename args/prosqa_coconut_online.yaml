@@ -33,17 +33,17 @@ dataset: # used for online
     valid: 300
     test: 500
 
-  num_nodes: [5, 20]
-  num_layers: [2, 5]
+  num_nodes: [5, 15]
+  num_layers: [2, 4]
   connection_prob: 0.3
-train_path: data/prontoqa_train.json
-val_path: data/prontoqa_valid.json
+train_path: data/prosqa_train_online.json
+val_path: data/prosqa_valid_online.json
 
 # --- optimizer --- #
 reset_optimizer: True
 batch_size_training: 32
 debug: False
-gradient_accumulation_steps: 2
+gradient_accumulation_steps: 1
 num_epochs: 50
 lr: !!float "1e-4"
 weight_decay: 0.01
