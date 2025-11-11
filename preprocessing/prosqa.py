@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union
 import random, math, json
 import traceback
 
@@ -134,27 +134,14 @@ class DAG:
         return self.descendants[a]
 
     def get_paths_between(self, a: int, b: int) -> Optional[List[int]]:
+        if a == b:
+            return [b]
+
         if self.paths[a][b] is None:
-            results = []
-            paths = [[b]]
-            update = True
-
-            # compute all paths
-            while update:
-                _paths = []
-                update = False
-
-                for path in paths:
-                    update |= len(self.parents[path[-1]]) > 0
-                    for parent in self.parents[path[-1]]:
-                        if parent == a:
-                            results.append(path + [parent])
-                        else:
-                            _paths.append(path + [parent])
-
-                paths = _paths
-
-            self.paths[a][b] = [path[::-1] for path in results]
+            paths = []
+            for descendant in self.get_descendants(a):
+                paths.extend([[a] + path for path in self.get_paths_between(descendant, b)])
+            self.paths[a][b] = paths
 
         return self.paths[a][b]
 
