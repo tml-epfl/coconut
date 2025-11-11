@@ -36,8 +36,8 @@ dataset: # used for online
   num_nodes: [5, 20]
   num_layers: [2, 5]
   connection_prob: 0.3
-train_path: data/prontoqa_train.json
-val_path: data/prontoqa_valid.json
+train_path: data/prosqa_train.json
+val_path: data/prosqa_valid.json
 
 # --- optimizer --- #
 reset_optimizer: True
