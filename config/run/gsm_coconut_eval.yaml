@@ -1,0 +1,11 @@
+project: coconut
+seed: 0
+debug: false
+bf16: false
+resume: 15
+save_only_improve: false
+load_model_path: null
+only_eval: true
+name: gsm-coconut
+save_path: outputs/gsm/coconut
+

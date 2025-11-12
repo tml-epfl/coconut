@@ -26,22 +26,34 @@ from dataset import (
 )
 
 from tqdm import tqdm
-from copy import copy
+from copy import copy, deepcopy
 import itertools
 import os, sys
-import yaml
 import json
 import gc
-import argparse
 import functools
-from utils import Config, set_seed
+import atexit
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
+from utils import set_seed
 
 
-def main():
-    parser = argparse.ArgumentParser(description="coconut")
-    parser.add_argument("config_file")
-    args = parser.parse_args()
+def _cleanup_process_group():
+    if dist.is_initialized():
+        try:
+            dist.destroy_process_group()
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            if os.environ.get("RANK", "0") == "0":
+                print(f"Process group cleanup encountered an error: {exc}")
 
+
+atexit.register(_cleanup_process_group)
+
+
+@hydra.main(version_base=None, config_path="config", config_name="config")
+def main(cfg: DictConfig):
     # init distributed environment
     dist.init_process_group("nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -49,19 +61,39 @@ def main():
     world_size = int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(local_rank)
 
-    # load the configuration file
-    with open(args.config_file) as f:
-        config_dict = yaml.safe_load(f)
-
     if rank == 0:
-        print("Config:", config_dict)
+        print("Config:", OmegaConf.to_container(cfg, resolve=True))
 
-    configs = Config(config_dict)
-    set_seed(configs.seed)
+    merged_dict = {}
+    run_section = None
+    has_sections = False
+    for section in ["run", "data", "method", "model", "training"]:
+        if section in cfg:
+            has_sections = True
+            section_dict = OmegaConf.to_container(cfg[section], resolve=True)
+            if section == "run":
+                run_section = section_dict
+            merged_dict.update(section_dict)
+
+    if not has_sections:
+        raise ValueError("No configuration sections found to merge.")
+
+    if run_section is not None:
+        merged_dict["run"] = run_section
+
+    configs = OmegaConf.create(merged_dict)
+
+    def has_load_path(path):
+        if path is None:
+            return False
+        if isinstance(path, str) and path.lower() == "none":
+            return False
+        return str(path).strip() != ""
+    set_seed(configs.run.seed)
     save_dir = os.path.join(configs.save_path, configs.name)
 
-    if not os.path.exists(save_dir) and rank == 0:
-        os.makedirs(save_dir)
+    if rank == 0 and not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
 
     torch.distributed.barrier()
     cur_ckpts = os.listdir(save_dir)
@@ -74,8 +106,12 @@ def main():
         # need to find the latest checkpoint and resume from that.
 
         if rank == 0:
+            banner = "=" * 80
             print(
-                f"Warning: found previous run and gonna resume from that. the inputted `resume` argument is ignored!"
+                f"\n{banner}\n"
+                "!! RESUMING FROM PREVIOUS RUN !!\n"
+                "Found an existing checkpoint directory; ignoring the provided `resume` value.\n"
+                f"{banner}\n"
             )
 
         checkpoints = [f for f in cur_ckpts if f.startswith("checkpoint_")]
@@ -83,15 +119,16 @@ def main():
 
         # Get the last item in the sorted list
         latest_checkpoint = checkpoints[-1] if checkpoints else None
-        configs.resume = int(latest_checkpoint.split("_")[1])
-        load_dir = os.path.join(configs.save_path, configs.name, latest_checkpoint)
+        if latest_checkpoint is not None:
+            configs.resume = int(latest_checkpoint.split("_")[1])
+            load_dir = os.path.join(configs.save_path, configs.name, latest_checkpoint)
 
-        configs.load_model_path = load_dir
-        print(f"Loading from previous run epoch_{configs.resume}!")
+            configs.load_model_path = load_dir
+            print(f"Loading from previous run epoch_{configs.resume}!")
 
     elif configs.resume != 0:
         # by setting `resume`, we can skip a few epoches at the beginning.
-        if configs.load_model_path == "None":
+        if not has_load_path(configs.load_model_path):
             print(
                 f"Warning: you want to skip the first {configs.resume} but you are not loading any existing checkpoint!"
             )
@@ -133,7 +170,7 @@ def main():
 
     loaded = False
 
-    if configs.load_model_path != "None":
+    if has_load_path(configs.load_model_path):
         saved_weights = torch.load(
             configs.load_model_path, map_location=torch.device(rank)
         )
@@ -184,7 +221,7 @@ def main():
     if configs.coconut:
         model = Coconut(model, latent_id, start_id, end_id, tokenizer.eos_token_id)
 
-    if configs.load_model_path != "None" and not loaded:
+    if has_load_path(configs.load_model_path) and not loaded:
         print(model.load_state_dict(saved_weights, strict=False))
 
     print(f"Running FSDP on rank = {rank}, world size = {world_size}")
@@ -277,7 +314,9 @@ def main():
 
     if not configs.debug and not configs.only_eval and rank == 0:
         wandb_run = wandb.init(project=configs.project, name=configs.name)
-        wandb_run.config.update(configs, allow_val_change=True)
+        wandb_run.config.update(
+            OmegaConf.to_container(configs, resolve=True), allow_val_change=True
+        )
         text_table = wandb.Table(columns=["step", "text"])
 
     else:

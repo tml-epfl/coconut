@@ -1,0 +1,10 @@
+model_id: openai-community/gpt2
+model_init: scratch
+model_config_overrides:
+  n_layer: 6
+  n_head: 8
+  n_embd: 512
+  resid_pdrop: 0.0
+  embd_pdrop: 0.0
+  attn_pdrop: 0.0
+

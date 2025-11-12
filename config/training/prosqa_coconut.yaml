@@ -1,0 +1,12 @@
+c_thought: 1
+epochs_per_stage: 5
+max_latent_stage: 6
+pad_latent_to_max: true
+uniform_prob: 0.0
+reset_optimizer: true
+batch_size_training: 32
+gradient_accumulation_steps: 2
+num_epochs: 50
+lr: 0.0001
+weight_decay: 0.01
+

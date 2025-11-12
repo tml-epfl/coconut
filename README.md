@@ -43,60 +43,58 @@ For example, you can download and process the [GSM8K](https://arxiv.org/abs/2110
 bash preprocessing/gsm_icot.bash
 ```
 
-## Arguments
+## Configuration
 
-The configuration of a run should be specified in a yaml file (an example can be found [here](args/gsm_coconut.yaml)).
+Hydra composes five config groups in [`config/config.yaml`](config/config.yaml): `run/`, `data/`, `method/`, `model/`, and `training/`. The defaults reproduce the classic ProsQA Coconut experiment:
 
-- **General settings**
+```
+defaults:
+  - run: prosqa_coconut
+  - data: prosqa_file
+  - method: coconut
+  - model: gpt2_scratch_small
+  - training: prosqa_coconut
+```
 
-  - **project**: Project name for wandb
-  - **save_path**: Your path to store the checkpoints
-  - **only_eval**: If true, only load a model and test on the data from `val_path` (must used along with `load_model_path`). Otherwise, train the model on `train_path` and test on `val_path` after every epoch.
+Swap any component from the command line, e.g. `run=gsm_coconut` or `method=cot`:
 
-- **Method**
-  - **coconut**: Train coconut model
-  - **cot**: Train cot model
-  - **no_thoughts**: Train coconut (w/o thought) model
-  - **no_cot**: Train no-cot model
+```
+torchrun --nnodes 1 --nproc_per_node N_GPUS run.py run=gsm_coconut data=gsm_file method=coconut model=gpt2_pretrained training=gsm_coconut
+```
 
-- **Training settings**
+The table below maps each legacy YAML to the grouped overrides you should pass. Add your own checkpoint paths for the rows that specify `load_model_path`.
 
-  - **c_thought**: Number of continuous thoughts for each reasoning step
-  - **epochs_per_stage**: Number of epochs for every training stage
-  - **max_latent_stage**: The maximum number of training stages (in addition to the initial stage)
-  - **pad_latent_to_max**: If the number of reasoning steps is fewer than the index of current training stage, pad the number of continuous thoughts.
-  - **save_only_improve**: Save the model only when there the best validation accuracy is updated. Recommended to set `False` for Coconut model training, because otherwise the checkpoints in the last stage might now get saved.
-  - **uniform_prob**: The probability to mix data from other stages. 0 for standard experiment, 0.3 for analysis experiment.
-  - **model_id**: Huggingface model id to load as the initialization, e.g., `openai-community/gpt2`
-  - **load_model_path**: The path to a checkpoint to load. Used in two cases: (1) for evaluation (2) to initialize coconut from a CoT-tuned model.
-  - **seed**: Random seed.
-  - **resume**: The epoch to resume. Can be used when we want to skip the initial training stages.
-  - **bf16**: Whether to use bf16 training.
-  - **train_path**: Path to the training set.
-  - **val_path**: Path to the validation or test set (depending on `only_eval`)
-  - **reset_optimizer**: Whether to reset the optimizer when swtiching training stages.
-  - **batch_size_training**: Batch size to train the model per GPU.
-  - **debug**: If true, there is no wandb and model saving. A subset of data will be used.
-  - **gradient_accumulation_steps**: Gradient accumulation steps
-  - **num_epochs**: Maximum training epoches.
-  - **lr**: Learning rate
-  - **weight_decay**: Weight decay
+| Legacy YAML | Hydra groups to set | Extra CLI flags |
+| --- | --- | --- |
+| `args/prosqa_coconut.yaml` | *(defaults)* | |
+| `args/prosqa_coconut_eval.yaml` | `run=prosqa_coconut_eval`, `data=prontoqa_file`, `training=prosqa_eval` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/prosqa_coconut_reversed.yaml` | `run=prosqa_coconut_reversed`, `method=coconut_reversed` | |
+| `args/prosqa_coconut_online.yaml` | `run=prosqa_coconut_online`, `data=prosqa_online` | |
+| `args/prosqa_coconut_online_reversed.yaml` | `run=prosqa_coconut_online_reversed`, `data=prosqa_online`, `method=coconut_reversed` | |
+| `args/prosqa_cot.yaml` | `run=prosqa_cot`, `method=cot`, `training=prosqa_cot` | |
+| `args/prontoqa_coconut.yaml` | `run=prontoqa_coconut`, `data=prontoqa_file`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | |
+| `args/prontoqa_coconut_eval.yaml` | `run=prontoqa_coconut_eval`, `data=prontoqa_eval`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/gsm_coconut.yaml` | `run=gsm_coconut`, `data=gsm_file`, `model=gpt2_pretrained`, `training=gsm_coconut` | `load_model_path=/path/to/cot/checkpoint` |
+| `args/gsm_coconut_eval.yaml` | `run=gsm_coconut_eval`, `data=gsm_eval`, `model=gpt2_pretrained`, `training=gsm_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/gsm_cot.yaml` | `run=gsm_cot`, `data=gsm_file`, `method=cot`, `model=gpt2_pretrained`, `training=gsm_cot` | |
 
+You can still combine additional overrides (for example `uniform_prob=0.3` or `save_only_improve=true`) on the same command line. The historical `args/` directory is kept for reference only.
 
 ## Training
 
-Run the following commands (replacing `N_GPUS` and `PATH_TO_ARGS`):
+Launch the default ProsQA Coconut setup (matches `args/prosqa_coconut.yaml`) with the built-in defaults:
 
 ```
-torchrun --nnodes 1 --nproc_per_node N_GPUS run.py PATH_TO_ARGS
+torchrun --nnodes 1 --nproc_per_node N_GPUS run.py
 ```
+
+Append group overrides from the table above to reproduce any other configuration.
 
 ## Reproducing Experiments
 
 Here we provide instructions to reproduce our experiments in the paper.
 
-All the commands below assume 4 * A100 (80GB) GPUs. You may change the corresponding arguments in the config file (`batch_size_training`, `gradient_accumulation_steps`) and `nproc_per_node` when launching the run, to adapt your resources.
-
+All the commands below assume 4 * A100 (80GB) GPUs. Adjust `nproc_per_node`, batch sizes, or other overrides to suit your hardware.
 
 ### GSM8K
 
@@ -106,22 +104,39 @@ Preprocessing data:
 bash preprocessing/gsm_icot.bash
 ```
 
-First train the model with CoT (as the stage 0 training)
+Stage 0 CoT training:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_cot.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=gsm_cot \
+  data=gsm_file \
+  method=cot \
+  model=gpt2_pretrained \
+  training=gsm_cot
 ```
 
-Select a checkpoint as the initialization of Coconut (the validation accuracy is expected to be around 40%). Replace the `load_model_path` in the [args/gsm_coconut.yaml](args/gsm_coconut.yaml) with your selected checkpoint, and run:
+Stage 1 Coconut (initialize from the CoT checkpoint):
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=gsm_coconut \
+  data=gsm_file \
+  method=coconut \
+  model=gpt2_pretrained \
+  training=gsm_coconut \
+  load_model_path=/path/to/cot/checkpoint
 ```
 
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/gsm_coconut_eval.yaml](args/gsm_coconut_eval.yaml). To evaluate:
+Evaluation:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=gsm_coconut_eval \
+  data=gsm_eval \
+  method=coconut \
+  model=gpt2_pretrained \
+  training=gsm_coconut \
+  load_model_path=/path/to/coconut/checkpoint
 ```
 
 ### ProntoQA
@@ -133,38 +148,55 @@ cd prontoqa
 python run_experiment.py --model-name json --model-size dummy --ordering random --num-trials 10000 --few-shot-examples 0 --ontology fictional --min-hops 5 --max-hops 5 --hops-skip 1
 ```
 
-Then copy the generated `5hop_0shot_random.json` file to `data` directory, and preprocess the dataset with:
+Then copy the generated `5hop_0shot_random.json` file to `data` and preprocess with:
 
 ```bash
 python preprocessing/prontoqa.py
 ```
 
-
-Then run the following to train the model:
-```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prontoqa_coconut.yaml
-```
-
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
+Training:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=prontoqa_coconut \
+  data=prontoqa_file \
+  method=coconut \
+  model=gpt2_pretrained \
+  training=prontoqa_coconut
 ```
 
+Evaluation:
+
+```bash
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=prontoqa_coconut_eval \
+  data=prontoqa_eval \
+  method=coconut \
+  model=gpt2_pretrained \
+  training=prontoqa_coconut \
+  load_model_path=/path/to/coconut/checkpoint
+```
 
 ### ProsQA
 
-The ProsQA dataset is at [data/prosqa_*.json](data).
+The ProsQA dataset is at [`data/prosqa_*.json`](data).
 
-Then run the following to train the model:
+Train (defaults):
+
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py
 ```
 
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
+Evaluate with your best checkpoint:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 4 run.py \
+  run=prosqa_coconut_eval \
+  data=prontoqa_file \
+  method=coconut \
+  model=gpt2_scratch_small \
+  training=prosqa_eval \
+  load_model_path=/path/to/coconut/checkpoint
 ```
 
 

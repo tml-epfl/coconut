@@ -1,0 +1,4 @@
+model_id: openai-community/gpt2
+model_init: pretrained
+model_config_overrides: {}
+

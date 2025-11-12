@@ -1,0 +1,6 @@
+defaults:
+  - base
+
+name: prosqa-coconut
+save_path: outputs/prosqa/default
+

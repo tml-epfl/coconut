@@ -1,0 +1,15 @@
+defaults:
+  - run: prosqa_coconut
+  - data: prosqa_file
+  - method: coconut
+  - model: gpt2_scratch_small
+  - training: prosqa_coconut
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
+
