@@ -9,5 +9,5 @@ dataset:
   num_nodes: [5, 20]
   num_layers: [2, 5]
   connection_prob: 0.3
-  online: true
+  online: True
 
