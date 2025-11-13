@@ -89,6 +89,7 @@ def main(cfg: DictConfig):
         if isinstance(path, str) and path.lower() == "none":
             return False
         return str(path).strip() != ""
+
     set_seed(configs.run.seed)
     save_dir = os.path.join(configs.save_path, configs.name)
 

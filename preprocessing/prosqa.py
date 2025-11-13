@@ -2,6 +2,8 @@ from typing import List, Optional, Union
 import random, math, json
 import traceback
 
+import numpy as np
+
 
 class DAG:
     @staticmethod
@@ -140,7 +142,9 @@ class DAG:
         if self.paths[a][b] is None:
             paths = []
             for descendant in self.get_descendants(a):
-                paths.extend([[a] + path for path in self.get_paths_between(descendant, b)])
+                paths.extend(
+                    [[a] + path for path in self.get_paths_between(descendant, b)]
+                )
             self.paths[a][b] = paths
 
         return self.paths[a][b]
@@ -220,7 +224,7 @@ def generate_query_from_dag(
                 "{#2}", entities[b]
             )
 
-            return context, question, chain, answer
+            return (a, b, c), context, question, chain, answer
         except Exception as e:
             if verbose:
                 print(e)
@@ -271,3 +275,22 @@ def get_names_and_entities(file: str) -> None:
         f.writelines([str(number) + "\n" for number in names])
     with open("entities.txt", "w") as f:
         f.writelines([str(number) + "\n" for number in entities])
+
+
+def get_statistics(file: str) -> None:
+    with open(file, "r") as file:
+        data = json.load(file)
+
+    num_nodes = [len(d["idx_to_symbol"]) for d in data]
+    num_steps = [len(d["steps"]) for d in data]
+    num_edges = [len(d["edges"]) for d in data]
+
+    for name, data in {"nodes": num_nodes, "steps": num_steps, "edges": num_edges}:
+        np_array = np.array(data)
+
+        mean_value = np.mean(np_array)
+        variance_value = np.var(np_array)
+        print(f"\nResults for: {name}")
+        print(f"Data: {data}")
+        print(f"  -> Mean:     {mean_value:.4f}")  # Format to 4 decimal places
+        print(f"  -> Variance: {variance_value:.4f}")

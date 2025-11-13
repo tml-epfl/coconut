@@ -17,7 +17,6 @@ from preprocessing.prosqa import (
     DAG,
     sample_names_for_dag,
     generate_query_from_dag,
-    get_names_and_entities,
 )
 
 
@@ -368,12 +367,16 @@ def generate_dataset(
                 num_layers=n_layers,
                 connection_probability=connection_prob,
             )
-            data = generate_query_from_dag(
-                dag, sample_names_for_dag(dag, names, entities)
-            )
+            labels = sample_names_for_dag(dag, names, entities)
+            data = generate_query_from_dag(dag, labels)
 
-        context, question, chain, answer = data
+        nodes, context, question, chain, answer = data
         sample = {
+            "edges": [item for sublist in dag.edges for item in sublist],
+            "root": nodes[0],
+            "target": nodes[1],
+            "neg_target": nodes[2],
+            "idx_to_symbol": labels,
             "question": context + " " + question,
             "steps": chain,
             "answer": answer,
