@@ -358,19 +358,21 @@ def generate_dataset(
         Returns:
             dict: A dictionary with "question", "steps", and "answer" keys.
         """
-        data = None
-        while data is None:
-            n_nodes = random.randint(num_nodes[0], num_nodes[1])
-            n_layers = random.randint(num_layers[0], num_layers[1])
-            dag = DAG.generate_layered_dag(
-                num_nodes=n_nodes,
-                num_layers=n_layers,
-                connection_probability=connection_prob,
-            )
-            labels = sample_names_for_dag(dag, names, entities)
-            data = generate_query_from_dag(dag, labels)
+        while True:
+            try:
+                n_nodes = random.randint(num_nodes[0], num_nodes[1])
+                n_layers = random.randint(num_layers[0], num_layers[1])
+                dag = DAG.generate_layered_dag(
+                    num_nodes=n_nodes,
+                    num_layers=n_layers,
+                    connection_probability=connection_prob,
+                )
+                labels = sample_names_for_dag(dag, names, entities)
+                nodes, context, question, chain, answer = generate_query_from_dag(dag, labels)
+                break
+            except:
+                continue
 
-        nodes, context, question, chain, answer = data
         sample = {
             "edges": [item for sublist in dag.edges for item in sublist],
             "root": nodes[0],
