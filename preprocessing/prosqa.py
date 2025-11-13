@@ -137,7 +137,7 @@ class DAG:
 
     def get_paths_between(self, a: int, b: int) -> Optional[List[int]]:
         if a == b:
-            return [b]
+            return [[b]]
 
         if self.paths[a][b] is None:
             paths = []
@@ -285,12 +285,11 @@ def get_statistics(file: str) -> None:
     num_steps = [len(d["steps"]) for d in data]
     num_edges = [len(d["edges"]) for d in data]
 
-    for name, data in {"nodes": num_nodes, "steps": num_steps, "edges": num_edges}:
+    for name, data in {"nodes": num_nodes, "steps": num_steps, "edges": num_edges}.items():
         np_array = np.array(data)
 
         mean_value = np.mean(np_array)
         variance_value = np.var(np_array)
         print(f"\nResults for: {name}")
-        print(f"Data: {data}")
         print(f"  -> Mean:     {mean_value:.4f}")  # Format to 4 decimal places
         print(f"  -> Variance: {variance_value:.4f}")
