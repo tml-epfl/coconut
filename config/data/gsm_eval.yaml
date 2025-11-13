@@ -1,0 +1,3 @@
+data_type: file
+train_path: data/gsm_train.json
+val_path: data/gsm_test.json

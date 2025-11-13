@@ -1,0 +1,3 @@
+data_type: file
+train_path: data/prontoqa_train.json
+val_path: data/prontoqa_test.json

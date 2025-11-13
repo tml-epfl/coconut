@@ -1,0 +1,12 @@
+data_type: synthetic
+train_path: null
+val_path: null
+dataset:
+  size:
+    train: 17886
+    valid: 300
+    test: 500
+  num_nodes: [5, 20]
+  num_layers: [2, 5]
+  connection_prob: 0.3
+

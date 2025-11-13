@@ -65,8 +65,6 @@ Thumbs.db
 # Other
 *.log
 *.tmp
-# Local data and results
-data/
 *.jsonl
 *.json
 *.out
