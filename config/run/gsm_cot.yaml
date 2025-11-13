@@ -8,4 +8,9 @@ load_model_path: null
 only_eval: false
 name: gsm-cot
 save_path: outputs/gsm/cot
+wandb_entity: tml-coconut
+
+resume_mode: auto
+resume_attempt_id: null
+signature_ignore_keys: []
 

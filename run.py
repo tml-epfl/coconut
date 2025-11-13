@@ -1,43 +1,232 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
+import atexit
+import datetime
+import functools
+import gc
+import itertools
+import json
+import os
+import sys
+from copy import copy, deepcopy
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import hydra
 import torch
 import torch.distributed
-import torch.optim as optim
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
-import wandb
-
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
+import torch.optim as optim
+import wandb
+from omegaconf import DictConfig, OmegaConf
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from tqdm import tqdm
 
 from coconut import Coconut
 from dataset import (
-    get_dataset,
-    get_question_latent_dataset,
-    get_cot_latent_dataset,
     MyCollator,
     generate_dataset,
+    get_cot_latent_dataset,
+    get_dataset,
+    get_question_latent_dataset,
+)
+from utils import (
+    compute_experiment_signature,
+    generate_attempt_id,
+    get_git_metadata,
+    set_seed,
 )
 
-from tqdm import tqdm
-from copy import copy, deepcopy
-import itertools
-import os, sys
-import json
-import gc
-import functools
-import atexit
+MANIFEST_FILENAME = "run_manifest.yaml"
+CONFIG_SNAPSHOT_FILENAME = "config.yaml"
 
-import hydra
-from omegaconf import DictConfig, OmegaConf
 
-from utils import set_seed
+def _now_iso() -> str:
+    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _to_container(value: Any) -> Any:
+    if isinstance(value, DictConfig):
+        return OmegaConf.to_container(value, resolve=True)
+    return value
+
+
+def _load_yaml_dict(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        data = OmegaConf.load(str(path))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"Warning: failed to load manifest at {path}: {exc}")
+        return None
+    if data is None:
+        return None
+    return _to_container(data)
+
+
+def _save_yaml_dict(data: Dict[str, Any], path: Path) -> None:
+    cfg = OmegaConf.create(data)
+    OmegaConf.save(config=cfg, f=str(path), resolve=True)
+
+
+def _list_checkpoints(attempt_path: Path) -> List[Tuple[int, Path]]:
+    checkpoints: List[Tuple[int, Path]] = []
+    if not attempt_path.exists():
+        return checkpoints
+    for candidate in attempt_path.glob("checkpoint_*"):
+        name = candidate.name
+        parts = name.split("_")
+        if len(parts) != 2:
+            continue
+        epoch_str = parts[1]
+        if not epoch_str.isdigit():
+            continue
+        checkpoints.append((int(epoch_str), candidate))
+    checkpoints.sort(key=lambda item: item[0])
+    return checkpoints
+
+
+def _list_attempts(signature_root: Path) -> List[Dict[str, Any]]:
+    attempts: List[Dict[str, Any]] = []
+    if not signature_root.exists():
+        return attempts
+    for child in signature_root.iterdir():
+        if not child.is_dir():
+            continue
+        manifest = _load_yaml_dict(child / MANIFEST_FILENAME) or {}
+        checkpoints = _list_checkpoints(child)
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            mtime = 0
+        attempts.append(
+            {
+                "id": child.name,
+                "path": child,
+                "manifest": manifest,
+                "checkpoints": checkpoints,
+                "mtime": mtime,
+            }
+        )
+    attempts.sort(key=lambda item: item["mtime"], reverse=True)
+    return attempts
+
+
+def _prepare_attempt(
+    *,
+    configs: DictConfig,
+    signature: str,
+    resume_mode: str,
+    resume_attempt_id: Optional[str],
+    git_metadata: Dict[str, Any],
+    signature_root: Path,
+) -> Dict[str, Any]:
+    resume_mode = (resume_mode or "auto").lower()
+    if resume_mode not in {"auto", "force", "never"}:
+        raise ValueError(
+            f"Unsupported resume_mode '{resume_mode}'. "
+            "Expected one of ['auto', 'force', 'never']."
+        )
+
+    signature_root.mkdir(parents=True, exist_ok=True)
+    attempts = _list_attempts(signature_root)
+
+    selected: Optional[Dict[str, Any]] = None
+    if resume_attempt_id:
+        for attempt in attempts:
+            if attempt["id"] == resume_attempt_id:
+                selected = attempt
+                break
+        if selected is None:
+            raise ValueError(
+                f"resume_attempt_id='{resume_attempt_id}' not found under {signature_root}"
+            )
+    elif resume_mode == "force" and attempts:
+        selected = attempts[0]
+    elif resume_mode == "auto":
+        for attempt in attempts:
+            status = attempt["manifest"].get("status", "unknown")
+            if status != "completed":
+                selected = attempt
+                break
+
+    if resume_mode == "never" and not resume_attempt_id:
+        selected = None
+
+    is_new_attempt = selected is None
+
+    if is_new_attempt:
+        attempt_id = generate_attempt_id()
+        while (signature_root / attempt_id).exists():
+            attempt_id = generate_attempt_id()
+        attempt_path = signature_root / attempt_id
+        attempt_path.mkdir(parents=True, exist_ok=False)
+        manifest: Dict[str, Any] = {
+            "signature": signature,
+            "attempt_id": attempt_id,
+            "status": "running",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+            "git": git_metadata,
+            "resume_mode": resume_mode,
+            "resumptions": 0,
+            "last_checkpoint": None,
+            "resume_epoch": 0,
+        }
+        checkpoints: List[Tuple[int, Path]] = []
+    else:
+        attempt_id = selected["id"]
+        attempt_path = selected["path"]
+        attempt_path.mkdir(parents=True, exist_ok=True)
+        checkpoints = selected["checkpoints"]
+        manifest = selected["manifest"] or {}
+        manifest.setdefault("signature", signature)
+        manifest["attempt_id"] = attempt_id
+        manifest["status"] = "running"
+        manifest["updated_at"] = _now_iso()
+        manifest["git"] = git_metadata
+        manifest["resume_mode"] = resume_mode
+        manifest["resumptions"] = manifest.get("resumptions", 0) + 1
+        resume_epoch_default = manifest.get("resume_epoch", 0)
+        if checkpoints:
+            resume_epoch_default = checkpoints[-1][0]
+            manifest["last_checkpoint"] = checkpoints[-1][1].name
+        manifest["resume_epoch"] = resume_epoch_default
+
+    manifest_path = attempt_path / MANIFEST_FILENAME
+    _save_yaml_dict(manifest, manifest_path)
+
+    checkpoint_entries = [ckpt[1].name for ckpt in checkpoints]
+    latest_checkpoint_path = str(checkpoints[-1][1]) if checkpoints else None
+    resume_epoch = manifest.get("resume_epoch", 0)
+
+    config_snapshot_path = attempt_path / CONFIG_SNAPSHOT_FILENAME
+    _save_yaml_dict(_to_container(configs), config_snapshot_path)
+
+    return {
+        "attempt_id": attempt_id,
+        "attempt_path": str(attempt_path),
+        "manifest_path": str(manifest_path),
+        "config_snapshot_path": str(config_snapshot_path),
+        "is_new_attempt": is_new_attempt,
+        "resume_epoch": resume_epoch,
+        "latest_checkpoint_path": latest_checkpoint_path,
+        "checkpoint_entries": checkpoint_entries,
+    }
+
+
+def _update_manifest(path: Path, updates: Dict[str, Any]) -> None:
+    existing = _load_yaml_dict(path) or {}
+    existing.update(updates)
+    existing["updated_at"] = _now_iso()
+    _save_yaml_dict(existing, path)
 
 
 def _cleanup_process_group():
@@ -91,49 +280,129 @@ def main(cfg: DictConfig):
         return str(path).strip() != ""
 
     set_seed(configs.run.seed)
-    save_dir = os.path.join(configs.save_path, configs.name)
 
-    if rank == 0 and not os.path.exists(save_dir):
+    signature_ignore_keys = set(getattr(configs, "signature_ignore_keys", []))
+    signature_ignore_keys.update(
+        {
+            "resume",
+            "run.resume",
+            "load_model_path",
+            "run.load_model_path",
+            "resume_mode",
+            "run.resume_mode",
+            "resume_attempt_id",
+            "run.resume_attempt_id",
+        }
+    )
+
+    git_metadata = get_git_metadata()
+    experiment_signature = compute_experiment_signature(
+        configs,
+        ignore_keys=signature_ignore_keys,
+        git_metadata=git_metadata,
+        extra={"name": configs.name},
+    )
+
+    resume_mode = getattr(configs, "resume_mode", "auto")
+    resume_attempt_id = getattr(configs, "resume_attempt_id", None)
+
+    signature_root = Path(configs.save_path) / configs.name / experiment_signature
+
+    attempt_info: Optional[Dict[str, Any]] = None
+    if rank == 0:
+        attempt_info = _prepare_attempt(
+            configs=configs,
+            signature=experiment_signature,
+            resume_mode=resume_mode,
+            resume_attempt_id=resume_attempt_id,
+            git_metadata=git_metadata,
+            signature_root=signature_root,
+        )
+
+    attempt_payload: List[Optional[Dict[str, Any]]] = [attempt_info]
+    dist.broadcast_object_list(attempt_payload, src=0)
+    attempt_info = attempt_payload[0]
+    if attempt_info is None:
+        raise RuntimeError("Failed to prepare run attempt information.")
+
+    save_dir = attempt_info["attempt_path"]
+    manifest_path = attempt_info["manifest_path"]
+    config_snapshot_path = attempt_info["config_snapshot_path"]
+    latest_checkpoint_path = attempt_info["latest_checkpoint_path"]
+    resume_epoch = attempt_info["resume_epoch"] or 0
+
+    if rank != 0:
         os.makedirs(save_dir, exist_ok=True)
 
     torch.distributed.barrier()
-    cur_ckpts = os.listdir(save_dir)
 
-    # check if the job is preempted and resumed.
+    manifest_path_obj = Path(manifest_path)
+    manifest_completion = {"completed": False}
+    if rank == 0:
 
-    if len(cur_ckpts) > 0 and not configs.only_eval:
-        # if there are previous checkpoints, and only_eval is False
-        # it means the previous run was preempted and the program is restarted.
-        # need to find the latest checkpoint and resume from that.
+        def _ensure_manifest_failure():
+            if not manifest_completion["completed"]:
+                _update_manifest(manifest_path_obj, {"status": "failed"})
 
+        atexit.register(_ensure_manifest_failure)
+
+    configs.experiment_signature = experiment_signature
+    configs.attempt_id = attempt_info["attempt_id"]
+    configs.attempt_path = save_dir
+    configs.manifest_path = manifest_path
+    configs.signature_root = str(signature_root)
+    configs.config_snapshot_path = config_snapshot_path
+    if "run" in configs and isinstance(configs.run, DictConfig):
+        configs.run.experiment_signature = experiment_signature
+        configs.run.attempt_id = attempt_info["attempt_id"]
+        configs.run.attempt_path = save_dir
+        configs.run.signature_root = str(signature_root)
+        configs.run.config_snapshot_path = config_snapshot_path
+
+    if configs.data_type == "synthetic":
+        synthetic_data_dir = Path(save_dir) / "data"
+        if rank == 0:
+            synthetic_data_dir.mkdir(parents=True, exist_ok=True)
+        torch.distributed.barrier()
+        train_path = synthetic_data_dir / "train.json"
+        val_path = synthetic_data_dir / "validation.json"
+        configs.train_path = str(train_path)
+        configs.val_path = str(val_path)
+        if "run" in configs and isinstance(configs.run, DictConfig):
+            configs.run.train_path = configs.train_path
+            configs.run.val_path = configs.val_path
+
+    user_requested_resume = configs.resume != 0
+    if rank == 0:
+        attempt_message = (
+            "Starting new attempt"
+            if attempt_info.get("is_new_attempt", False)
+            else "Using existing attempt"
+        )
+        print(
+            f"{attempt_message} '{attempt_info['attempt_id']}' "
+            f"for signature '{experiment_signature}' at '{save_dir}'."
+        )
+    if latest_checkpoint_path and not configs.only_eval:
         if rank == 0:
             banner = "=" * 80
             print(
                 f"\n{banner}\n"
                 "!! RESUMING FROM PREVIOUS RUN !!\n"
-                "Found an existing checkpoint directory; ignoring the provided `resume` value.\n"
+                "Found an existing attempt with checkpoints; ignoring the provided `resume` value.\n"
                 f"{banner}\n"
             )
-
-        checkpoints = [f for f in cur_ckpts if f.startswith("checkpoint_")]
-        checkpoints.sort(key=lambda x: int(x.split("_")[1]))
-
-        # Get the last item in the sorted list
-        latest_checkpoint = checkpoints[-1] if checkpoints else None
-        if latest_checkpoint is not None:
-            configs.resume = int(latest_checkpoint.split("_")[1])
-            load_dir = os.path.join(configs.save_path, configs.name, latest_checkpoint)
-
-            configs.load_model_path = load_dir
-            print(f"Loading from previous run epoch_{configs.resume}!")
-
-    elif configs.resume != 0:
-        # by setting `resume`, we can skip a few epoches at the beginning.
+        configs.resume = resume_epoch
+        configs.load_model_path = latest_checkpoint_path
+        if "run" in configs and isinstance(configs.run, DictConfig):
+            configs.run.resume = resume_epoch
+            configs.run.load_model_path = latest_checkpoint_path
+        print(f"Loading from previous run epoch_{configs.resume}!")
+    elif user_requested_resume and configs.resume != 0:
         if not has_load_path(configs.load_model_path):
             print(
                 f"Warning: you want to skip the first {configs.resume} but you are not loading any existing checkpoint!"
             )
-            # not an intended use case at this point
         print(
             f"Loading from {configs.load_model_path} and skip the first {configs.resume} epochs"
         )
@@ -253,7 +522,7 @@ def main(cfg: DictConfig):
     if rank == 0:
         print(parallel_model)
 
-    if configs.data_type == "online":
+    if configs.data_type == "synthetic":
 
         def _generate_dataset(path, **configs):
             if torch.cuda.device_count() > 1:
@@ -314,10 +583,33 @@ def main(cfg: DictConfig):
     total_train_steps = 0
 
     if not configs.debug and not configs.only_eval and rank == 0:
-        wandb_run = wandb.init(project=configs.project, name=configs.name)
+        wandb_entity = getattr(configs, "wandb_entity", None)
+        if isinstance(wandb_entity, str) and wandb_entity.lower() == "none":
+            wandb_entity = None
+        wandb_entity = wandb_entity or os.environ.get("WANDB_ENTITY")
+
+        wandb_kwargs = {"project": configs.project, "name": configs.name}
+        if wandb_entity:
+            wandb_kwargs["entity"] = wandb_entity
+
+        wandb_run = wandb.init(**wandb_kwargs)
         wandb_run.config.update(
             OmegaConf.to_container(configs, resolve=True), allow_val_change=True
         )
+        wandb_run.config.update(
+            {
+                "experiment_signature": experiment_signature,
+                "attempt_id": attempt_info["attempt_id"],
+                "resume_mode": resume_mode,
+                "resume_attempt_id": resume_attempt_id,
+            },
+            allow_val_change=True,
+        )
+        if config_snapshot_path and os.path.exists(config_snapshot_path):
+            wandb_run.save(
+                config_snapshot_path,
+                base_path=os.path.dirname(config_snapshot_path),
+            )
         text_table = wandb.Table(columns=["step", "text"])
 
     else:
@@ -338,7 +630,7 @@ def main(cfg: DictConfig):
     collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
 
     for epoch in range(configs.resume, configs.num_epochs):
-        if configs.data_type == "online" and epoch > configs.resume:
+        if configs.data_type == "synthetic" and epoch > configs.resume:
             if (
                 configs.dataset["size"]["valid"] < 0
             ):  # if negative, resample from scratch
@@ -508,10 +800,13 @@ def main(cfg: DictConfig):
             ):
                 states = parallel_model.state_dict()
                 if rank == 0:
-                    torch.save(
-                        states, os.path.join(save_dir, f"checkpoint_{epoch + 1}")
-                    )
+                    checkpoint_name = f"checkpoint_{epoch + 1}"
+                    torch.save(states, os.path.join(save_dir, checkpoint_name))
                     print("saving model.")
+                    _update_manifest(
+                        manifest_path_obj,
+                        {"last_checkpoint": checkpoint_name, "resume_epoch": epoch + 1},
+                    )
 
                 dist.barrier()
                 del states
@@ -631,8 +926,13 @@ def main(cfg: DictConfig):
             states = parallel_model.state_dict()
 
             if rank == 0:
-                torch.save(states, os.path.join(save_dir, f"checkpoint_{epoch + 1}"))
+                checkpoint_name = f"checkpoint_{epoch + 1}"
+                torch.save(states, os.path.join(save_dir, checkpoint_name))
                 print("saving model.")
+                _update_manifest(
+                    manifest_path_obj,
+                    {"last_checkpoint": checkpoint_name, "resume_epoch": epoch + 1},
+                )
 
             best_acc = cor / total
 
@@ -640,6 +940,10 @@ def main(cfg: DictConfig):
             del states
             gc.collect()
             torch.cuda.empty_cache()
+
+    if rank == 0:
+        _update_manifest(manifest_path_obj, {"status": "completed"})
+        manifest_completion["completed"] = True
 
 
 if __name__ == "__main__":

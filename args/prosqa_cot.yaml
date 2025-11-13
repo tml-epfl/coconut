@@ -34,7 +34,7 @@ resume: 0
 bf16: False
 
 # --- dataset --- #
-data_type: file # options: file or online
+data_type: file # options: file or synthetic
 dataset: # used for online
   size:
     train: 17886

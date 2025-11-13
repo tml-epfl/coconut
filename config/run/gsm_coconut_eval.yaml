@@ -8,4 +8,9 @@ load_model_path: null
 only_eval: true
 name: gsm-coconut
 save_path: outputs/gsm/coconut
+wandb_entity: tml-coconut
+
+resume_mode: auto
+resume_attempt_id: null
+signature_ignore_keys: []
 

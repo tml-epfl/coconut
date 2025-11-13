@@ -69,8 +69,8 @@ The table below maps each legacy YAML to the grouped overrides you should pass. 
 | `args/prosqa_coconut.yaml` | *(defaults)* | |
 | `args/prosqa_coconut_eval.yaml` | `run=prosqa_coconut_eval`, `data=prontoqa_file`, `training=prosqa_eval` | `load_model_path=/path/to/coconut/checkpoint` |
 | `args/prosqa_coconut_reversed.yaml` | `run=prosqa_coconut_reversed`, `method=coconut_reversed` | |
-| `args/prosqa_coconut_online.yaml` | `run=prosqa_coconut_online`, `data=prosqa_online` | |
-| `args/prosqa_coconut_online_reversed.yaml` | `run=prosqa_coconut_online_reversed`, `data=prosqa_online`, `method=coconut_reversed` | |
+| `args/synthetic_coconut.yaml` | `run=synthetic_coconut`, `data=synthetic` | |
+| `args/synthetic_coconut_reversed.yaml` | `run=synthetic_coconut_reversed`, `data=synthetic`, `method=coconut_reversed` | |
 | `args/prosqa_cot.yaml` | `run=prosqa_cot`, `method=cot`, `training=prosqa_cot` | |
 | `args/prontoqa_coconut.yaml` | `run=prontoqa_coconut`, `data=prontoqa_file`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | |
 | `args/prontoqa_coconut_eval.yaml` | `run=prontoqa_coconut_eval`, `data=prontoqa_eval`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
@@ -89,6 +89,47 @@ torchrun --nnodes 1 --nproc_per_node N_GPUS run.py
 ```
 
 Append group overrides from the table above to reproduce any other configuration.
+
+### Run Management, Signatures, and Resuming
+
+Every launch now derives an experiment signature from the fully-resolved Hydra config plus the current git commit (and a diff hash if the tree is dirty). Runs are stored under:
+
+```
+<save_path>/<name>/<signature>/<attempt_id>/
+```
+
+Each attempt directory contains:
+
+- `config.yaml`: the exact resolved config snapshot used for that launch
+- `run_manifest.yaml`: metadata including status (`running`, `failed`, `completed`), resume epoch, and last checkpoint
+- `checkpoint_*`: saved model weights for each epoch, if enabled
+
+This design lets Kubernetes or `torchrun` restarts safely resume unfinished training while ensuring that config or code changes create a fresh attempt automatically.
+
+Key CLI knobs (all live inside the `run` config group, so call them as `run.<flag>=...`):
+
+- `resume_mode`: `auto` (default) resumes the most recent unfinished attempt for the signature, `force` always resumes the newest attempt even if completed, and `never` always creates a fresh attempt.
+- `resume_attempt_id`: target a specific attempt folder by ID (overrides `resume_mode`).
+- `signature_ignore_keys`: list of dotted-key paths to drop when computing the signature if you want to treat certain parameters as non-material.
+
+Examples:
+
+```bash
+# Single-GPU smoke test (rank handled by torchrun)
+torchrun --standalone --nnodes 1 --nproc_per_node 1 run.py \
+  run=prosqa_coconut \
+  run.debug=true \
+  training.num_epochs=1 \
+  training.gradient_accumulation_steps=1
+
+# Force a brand-new attempt even if checkpoints exist
+torchrun --nnodes 1 --nproc_per_node 4 run.py run=prosqa_coconut run.resume_mode=never
+
+# Resume a specific attempt ID printed in the logs
+torchrun --nnodes 1 --nproc_per_node 4 run.py run=prosqa_coconut run.resume_attempt_id=abcd1234
+```
+
+When a run finishes successfully rank 0 marks the manifest as `completed`. If a process exits unexpectedly the manifest remains `running` or becomes `failed`, allowing the next launch with the same signature to resume from the most recent checkpoint automatically.
 
 ## Reproducing Experiments
 

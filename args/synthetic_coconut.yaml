@@ -1,8 +1,8 @@
 # need 4 gpus
 
 project: coconut
-save_path: outputs/prosqa/online
-name: prosqa-coconut-online
+save_path: outputs/synthetic/default
+name: synthetic-coconut
 
 only_eval: False
 
@@ -26,8 +26,8 @@ resume: 0
 bf16: False
 
 # --- dataset --- #
-data_type: online # options: file or online
-dataset: # used for online
+data_type: synthetic # options: file or synthetic
+dataset: # used for synthetic generation
   size:
     train: 17886
     valid: 300
@@ -36,8 +36,8 @@ dataset: # used for online
   num_nodes: [5, 15]
   num_layers: [2, 4]
   connection_prob: 0.3
-train_path: data/prosqa_train_online.json
-val_path: data/prosqa_valid_online.json
+train_path: null
+val_path: null
 
 # --- optimizer --- #
 reset_optimizer: True
@@ -47,3 +47,5 @@ gradient_accumulation_steps: 1
 num_epochs: 50
 lr: !!float "1e-4"
 weight_decay: 0.01
+
+
