@@ -633,7 +633,7 @@ def main(cfg: DictConfig):
         if (
             configs.data_type == "synthetic"
             and epoch > configs.resume
-            and configs.dataset.get("online", False)
+            and configs.dataset.get("online", True)
         ):
             _generate_dataset(configs.val_path, **configs_valid)
             base_dataset_valid = get_dataset(
