@@ -36,6 +36,7 @@ dataset: # used for synthetic generation
   num_nodes: [5, 15]
   num_layers: [2, 4]
   connection_prob: 0.3
+  online: true
 train_path: null
 val_path: null
 

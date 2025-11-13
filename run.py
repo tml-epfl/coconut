@@ -630,19 +630,18 @@ def main(cfg: DictConfig):
     collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
 
     for epoch in range(configs.resume, configs.num_epochs):
-        if configs.data_type == "synthetic" and epoch > configs.resume:
-            if (
-                configs.dataset["size"]["valid"] < 0
-            ):  # if negative, resample from scratch
-                _generate_dataset(configs.val_path, **configs_valid)
-                base_dataset_valid = get_dataset(
-                    configs.val_path,
-                    tokenizer,
-                    max_size=32 if configs.debug else 100000000,
-                )
-            if (
-                not configs.only_eval and configs.dataset["size"]["train"] < 0
-            ):  # if negative, resample from scratch
+        if (
+            configs.data_type == "synthetic"
+            and epoch > configs.resume
+            and configs.dataset.get("online", False)
+        ):
+            _generate_dataset(configs.val_path, **configs_valid)
+            base_dataset_valid = get_dataset(
+                configs.val_path,
+                tokenizer,
+                max_size=32 if configs.debug else 100000000,
+            )
+            if not configs.only_eval:
                 _generate_dataset(configs.train_path, **configs_train)
                 base_dataset_train = get_dataset(
                     configs.train_path,

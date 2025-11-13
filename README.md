@@ -71,6 +71,7 @@ The table below maps each legacy YAML to the grouped overrides you should pass. 
 | `args/prosqa_coconut_reversed.yaml` | `run=prosqa_coconut_reversed`, `method=coconut_reversed` | |
 | `args/synthetic_coconut.yaml` | `run=synthetic_coconut`, `data=synthetic` | |
 | `args/synthetic_coconut_reversed.yaml` | `run=synthetic_coconut_reversed`, `data=synthetic`, `method=coconut_reversed` | |
+For synthetic runs, set `dataset.online: true` to resample generated train/validation data at the start of each epoch, or `false` to reuse the same generated files across epochs.
 | `args/prosqa_cot.yaml` | `run=prosqa_cot`, `method=cot`, `training=prosqa_cot` | |
 | `args/prontoqa_coconut.yaml` | `run=prontoqa_coconut`, `data=prontoqa_file`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | |
 | `args/prontoqa_coconut_eval.yaml` | `run=prontoqa_coconut_eval`, `data=prontoqa_eval`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
