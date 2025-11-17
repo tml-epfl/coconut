@@ -5,7 +5,8 @@ import json
 import itertools
 import random
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
+from tqdm import tqdm
 
 import torch
 import torch.distributed as dist
@@ -370,18 +371,20 @@ def generate_dataset(
                 )
                 assert (
                     sum([len(e) for e in dag.edges]) == n_edges
-                ), "Number of edges is smaller than the given quantity!"
+                ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
 
                 labels = sample_names_for_dag(dag, names, entities)
                 nodes, context, question, chain, answer = generate_query_from_dag(
-                    dag, labels, length=-1
+                    dag, labels, length=n_layers-1
                 )
                 break
+            except KeyboardInterrupt:
+                raise
             except:
                 continue
 
         sample = {
-            "edges": [item for sublist in dag.edges for item in sublist],
+            "edges": [(i, item) for i, sublist in enumerate(dag.edges) for item in sublist],
             "root": nodes[0],
             "target": nodes[1],
             "neg_target": nodes[2],
@@ -393,6 +396,6 @@ def generate_dataset(
         }
         return sample
 
-    dataset = [generate_sample(idx) for idx in range(size)]
+    dataset = [generate_sample(idx) for idx in tqdm(range(size), desc="Generating samples")]
     with open(path, "w") as f:
         json.dump(dataset, f)

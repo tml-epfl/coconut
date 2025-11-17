@@ -64,14 +64,10 @@ class DAG:
         # --- Step 1: Assign each node to a layer ---
         # To ensure the graph can span all layers, we can optionally place the first
         # two nodes in the first and last layers respectively.
-        if num_nodes > 1:
-            node_layers[0] = 0
-            node_layers[1] = num_layers - 1
-            nodes_to_assign = range(2, num_nodes)
-        else:  # Handle the single-node case
-            if num_nodes == 1:
-                node_layers[0] = 0
-            nodes_to_assign = range(0)
+        assert num_nodes >= num_layers, "Number of nodes need to be larger than number of layers!"
+        for i in range(num_layers):
+            node_layers[i] = i
+        nodes_to_assign = list(range(num_layers, num_nodes))
 
         if layer_probabilities is None:
             # Uniformly assign the remaining nodes to any layer
@@ -88,12 +84,12 @@ class DAG:
                 node_layers[node_idx] = assigned_layers[i]
 
         # --- Step 2: Create edges based on layers and probability ---
-        node_pairs = [
-            (a, b)
-            for a in range(num_nodes)
-            for b in range(num_nodes)
-            if node_layers[a] == node_layers[b] - 1
-        ]
+        node_pairs = []
+        for a in range(num_nodes):
+            for b in range(num_nodes):
+                if node_layers[a] == node_layers[b] - 1:
+                    node_pairs.append((a, b))
+
         if num_edges > len(node_pairs):
             num_edges = len(node_pairs)
 
@@ -133,7 +129,7 @@ class DAG:
 
     def get_descendants(self, a: int) -> List[int]:
         if self.descendants[a] is None:
-            self.descendants[a] = self.edges[a]
+            self.descendants[a] = list(self.edges[a])
             for node in self.edges[a]:
                 self.descendants[a].extend(self.get_descendants(node))
             self.descendants[a] = list(set(self.descendants[a]))
@@ -146,9 +142,9 @@ class DAG:
 
         if self.paths[a][b] is None:
             paths = []
-            for descendant in self.get_descendants(a):
+            for c in self.edges[a]:
                 paths.extend(
-                    [[a] + path for path in self.get_paths_between(descendant, b)]
+                    [[a] + path for path in self.get_paths_between(c, b)]
                 )
             self.paths[a][b] = paths
 
@@ -172,11 +168,13 @@ def generate_query_from_dag(
         for i in range(len(dag.nodes))
     ]
 
+    if length == -1:
+        length = max(dag.layers)
+
     pairs = [
         (a, b)
         for a in dag.layer_map[0]
         for b in dag.layer_map[length]
-        if dag.layers[b] != 0
     ]
     random.shuffle(pairs)
 
