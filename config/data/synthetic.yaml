@@ -8,6 +8,6 @@ dataset:
     test: 500
   num_nodes: [5, 20]
   num_layers: [2, 5]
-  connection_prob: 0.3
+  num_edges: [20, 60]
   online: True
 

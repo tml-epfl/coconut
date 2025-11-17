@@ -43,7 +43,7 @@ dataset: # used for online
 
   num_nodes: [5, 15]
   num_layers: [2, 4]
-  connection_prob: 0.3
+  num_edges: [20, 60]
 train_path: data/prosqa_train.json
 val_path: data/prosqa_valid.json
 

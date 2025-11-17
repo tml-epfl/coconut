@@ -35,7 +35,7 @@ dataset: # used for online
 
   num_nodes: [5, 20]
   num_layers: [2, 5]
-  connection_prob: 0.3
+  num_edges: [20, 60]
 train_path: data/prontoqa_train.json
 val_path: data/prontoqa_valid.json
 
