@@ -340,7 +340,7 @@ def generate_dataset(
     size: int,
     num_nodes: Tuple[int, int],
     num_layers: Tuple[int, int],
-    connection_prob: float,
+    num_edges: Tuple[int, int],
     names: str,
     entities: str,
 ):
@@ -362,13 +362,20 @@ def generate_dataset(
             try:
                 n_nodes = random.randint(num_nodes[0], num_nodes[1])
                 n_layers = random.randint(num_layers[0], num_layers[1])
+                n_edges = random.randint(num_edges[0], num_edges[1])
                 dag = DAG.generate_layered_dag(
                     num_nodes=n_nodes,
                     num_layers=n_layers,
-                    connection_probability=connection_prob,
+                    num_edges=n_edges,
                 )
+                assert (
+                    sum([len(e) for e in dag.edges]) == n_edges
+                ), "Number of edges is smaller than the given quantity!"
+
                 labels = sample_names_for_dag(dag, names, entities)
-                nodes, context, question, chain, answer = generate_query_from_dag(dag, labels)
+                nodes, context, question, chain, answer = generate_query_from_dag(
+                    dag, labels, length=-1
+                )
                 break
             except:
                 continue

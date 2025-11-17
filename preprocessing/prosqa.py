@@ -3,6 +3,7 @@ import random, math, json
 import traceback
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class DAG:
@@ -10,7 +11,7 @@ class DAG:
     def generate_layered_dag(
         num_nodes: int,
         num_layers: int,
-        connection_probability: float,
+        num_edges: int,
         layer_probabilities: Optional[List[float]] = None,
     ):
         """
@@ -20,9 +21,7 @@ class DAG:
             num_nodes (int): The total number of nodes in the graph.
             num_layers (int): The number of layers to partition the nodes into. This
                             controls the depth of the graph. Must be at least 2.
-            connection_probability (float): The probability (between 0.0 and 1.0) of
-                                        creating an edge between nodes in
-                                        subsequent layers.
+            num_edges (int): The total number of edges in the graph.
             layer_probabilities (list[float], optional): A list of probabilities for
                                                         assigning a node to each layer.
                                                         The list length must equal
@@ -41,8 +40,10 @@ class DAG:
             raise ValueError("Number of nodes must be positive.")
         if num_layers < 2:
             raise ValueError("Number of layers must be at least 2 for connections.")
-        if not (0.0 <= connection_probability <= 1.0):
-            raise ValueError("Connection probability must be between 0.0 and 1.0.")
+        if not (num_edges >= num_layers - 1):
+            raise ValueError(
+                "Number of edges must be at least as large as number of layers - 1"
+            )
         if layer_probabilities is not None:
             if len(layer_probabilities) != num_layers:
                 raise ValueError(
@@ -87,17 +88,21 @@ class DAG:
                 node_layers[node_idx] = assigned_layers[i]
 
         # --- Step 2: Create edges based on layers and probability ---
-        nodes = list(range(num_nodes))
-        for u in nodes:
-            for v in nodes:
-                if u == v:
-                    continue
+        node_pairs = [
+            (a, b)
+            for a in range(num_nodes)
+            for b in range(num_nodes)
+            if node_layers[a] == node_layers[b] - 1
+        ]
+        if num_edges > len(node_pairs):
+            num_edges = len(node_pairs)
 
-                # An edge can only go from a lower layer to a higher layer
-                if node_layers[u] < node_layers[v]:
-                    # Add the edge with the given probability
-                    if random.random() < connection_probability:
-                        graph[u].append(v)
+        edges = random.sample(
+            population=node_pairs,
+            k=num_edges,
+        )
+        for edge in edges:
+            graph[edge[0]].append(edge[1])
 
         return DAG(list(graph.keys()), node_layers, list(graph.values()))
 
@@ -157,6 +162,7 @@ def generate_query_from_dag(
     question_format: str = "Is {#1} a {#2} or a {#3}?",
     answer_format: str = "{#1} is a {#2}.",
     prefix_non_roots: str = "Every ",
+    length: int = -1,
     verbose: bool = False,
 ) -> str:
     if entities is None:
@@ -166,7 +172,12 @@ def generate_query_from_dag(
         for i in range(len(dag.nodes))
     ]
 
-    pairs = [(a, b) for a in dag.layer_map[0] for b in dag.nodes if dag.layers[b] != 0]
+    pairs = [
+        (a, b)
+        for a in dag.layer_map[0]
+        for b in dag.layer_map[length]
+        if dag.layers[b] != 0
+    ]
     random.shuffle(pairs)
 
     for a, b in pairs:
@@ -285,11 +296,51 @@ def get_statistics(file: str) -> None:
     num_steps = [len(d["steps"]) for d in data]
     num_edges = [len(d["edges"]) for d in data]
 
-    for name, data in {"nodes": num_nodes, "steps": num_steps, "edges": num_edges}.items():
-        np_array = np.array(data)
+    def _integer_bins(values: List[int]) -> List[int]:
+        """Return histogram bin edges aligned to integers."""
+        if not values:
+            return [0, 1]
+        min_val, max_val = min(values), max(values)
+        return list(range(min_val, max_val + 2))
 
-        mean_value = np.mean(np_array)
-        variance_value = np.var(np_array)
-        print(f"\nResults for: {name}")
-        print(f"  -> Mean:     {mean_value:.4f}")  # Format to 4 decimal places
-        print(f"  -> Variance: {variance_value:.4f}")
+    # Create three side-by-side histograms: nodes, steps, and edges.
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+
+    # Histogram for number of nodes
+    axs[0].hist(
+        num_nodes,
+        bins=_integer_bins(num_nodes),
+        color="tab:blue",
+        edgecolor="black",
+        alpha=0.7,
+    )
+    axs[0].set_title("Number of Nodes")
+    axs[0].set_xlabel("Nodes")
+    axs[0].set_ylabel("Frequency")
+
+    # Histogram for number of steps
+    axs[1].hist(
+        num_steps,
+        bins=_integer_bins(num_steps),
+        color="tab:orange",
+        edgecolor="black",
+        alpha=0.7,
+    )
+    axs[1].set_title("Number of Steps")
+    axs[1].set_xlabel("Steps")
+    axs[1].set_ylabel("Frequency")
+
+    # Histogram for number of edges
+    axs[2].hist(
+        num_edges,
+        bins=_integer_bins(num_edges),
+        color="tab:green",
+        edgecolor="black",
+        alpha=0.7,
+    )
+    axs[2].set_title("Number of Edges")
+    axs[2].set_xlabel("Edges")
+    axs[2].set_ylabel("Frequency")
+
+    plt.tight_layout()
+    plt.show()
