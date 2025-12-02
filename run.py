@@ -550,11 +550,13 @@ def main(cfg: DictConfig):
 
         configs_valid = configs.dataset.copy()
         configs_valid["size"] = abs(configs_valid["size"]["valid"])
+        del configs_valid["online"]
         _generate_dataset(configs.val_path, **configs_valid)
 
         if not configs.only_eval:
             configs_train = configs.dataset.copy()
             configs_train["size"] = abs(configs_train["size"]["train"])
+            del configs_train["online"]
             _generate_dataset(configs.train_path, **configs_train)
 
     # prepare the ground truth answer and cot for evaluation
