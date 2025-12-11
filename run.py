@@ -24,6 +24,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import BatchSampler
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
@@ -46,6 +47,101 @@ from utils import (
 
 MANIFEST_FILENAME = "run_manifest.yaml"
 CONFIG_SNAPSHOT_FILENAME = "config.yaml"
+
+
+class GraphIdxBatchSampler(BatchSampler):
+    """
+    BatchSampler that groups samples by graph_idx, ensuring all samples
+    with the same graph_idx appear in the same batch.
+
+    Args:
+        dataset: The dataset containing samples with 'graph_idx' field
+        batch_size: Maximum batch size (may be exceeded if a graph has many samples)
+        sampler: Optional sampler to use (e.g., DistributedSampler)
+        drop_last: Whether to drop the last incomplete batch
+    """
+
+    def __init__(
+        self,
+        dataset,
+        batch_size: int,
+        sampler: Optional[torch.utils.data.Sampler] = None,
+        drop_last: bool = False,
+    ):
+        # Group indices by graph_idx
+        graph_groups = {}
+        for idx in range(len(dataset)):
+            sample = dataset[idx]
+            graph_idx = sample.get("graph_idx", idx)  # fallback to idx if not present
+            if graph_idx not in graph_groups:
+                graph_groups[graph_idx] = []
+            graph_groups[graph_idx].append(idx)
+
+        # Create a mapping from indices to graph_idx for later lookup
+        idx_to_graph = {}
+        for graph_idx, indices in graph_groups.items():
+            for idx in indices:
+                idx_to_graph[idx] = graph_idx
+
+        # Get indices from sampler if provided (for distributed training)
+        if sampler is not None:
+            # Get the sampled indices (already distributed/shuffled)
+            sampled_indices = list(sampler)
+
+            # Group sampled indices by graph_idx, ensuring we get all samples
+            # from each graph that appears in the sampled indices
+            sampled_graph_groups = {}
+            for idx in sampled_indices:
+                graph_idx = idx_to_graph.get(idx, idx)
+                if graph_idx not in sampled_graph_groups:
+                    sampled_graph_groups[graph_idx] = []
+                sampled_graph_groups[graph_idx].append(idx)
+
+            # However, we need all samples from each graph, not just sampled ones
+            # So we get all indices for graphs that appear in sampled set
+            final_graph_groups = {}
+            for graph_idx in sampled_graph_groups.keys():
+                final_graph_groups[graph_idx] = graph_groups[graph_idx]
+
+            graph_groups = final_graph_groups
+            graph_indices = sorted(sampled_graph_groups.keys())  # Use sampled order
+        else:
+            graph_indices = sorted(graph_groups.keys())
+
+        # Create batches: each batch contains all samples from one or more graphs
+        # If a single graph has more samples than batch_size, it will still be in one batch
+        batches = []
+        current_batch = []
+
+        for graph_idx in graph_indices:
+            graph_indices_list = graph_groups[graph_idx]
+
+            # If adding this graph would exceed batch_size (and current batch is not empty),
+            # start a new batch
+            if (
+                current_batch
+                and len(current_batch) + len(graph_indices_list) > batch_size
+            ):
+                batches.append(current_batch)
+                current_batch = []
+
+            # Add all indices from this graph to current batch
+            current_batch.extend(graph_indices_list)
+
+        # Add the last batch if it's not empty
+        if current_batch:
+            if not drop_last or len(current_batch) >= batch_size:
+                batches.append(current_batch)
+
+        self.batches = batches
+        self.sampler = sampler
+
+    def __iter__(self):
+        for batch in self.batches:
+            yield batch
+
+    def __len__(self):
+        return len(self.batches)
 
 
 def _now_iso() -> str:
@@ -550,12 +646,14 @@ def main(cfg: DictConfig):
 
         configs_valid = configs.dataset.copy()
         configs_valid["size"] = abs(configs_valid["size"]["valid"])
+        configs_valid["num_chains"] = -1 if configs.multi else 1
         del configs_valid["online"]
         _generate_dataset(configs.val_path, **configs_valid)
 
         if not configs.only_eval:
             configs_train = configs.dataset.copy()
             configs_train["size"] = abs(configs_train["size"]["train"])
+            configs_train["num_chains"] = -1 if configs.multi else 1
             del configs_train["online"]
             _generate_dataset(configs.train_path, **configs_train)
 
@@ -685,15 +783,37 @@ def main(cfg: DictConfig):
                 shuffle=True,
             )
 
-            train_dataloader = torch.utils.data.DataLoader(
-                dataset_train,
-                num_workers=1,
-                shuffle=False,
-                pin_memory=True,
-                batch_size=configs.batch_size_training,
-                collate_fn=collator,
-                sampler=DistributedSampler(dataset_train, shuffle=True),
-            )
+            # Check if multi is enabled - use GraphIdxBatchSampler if True
+            multi = getattr(configs, "multi", False)
+
+            if multi:
+                # Create a BatchSampler that groups samples by graph_idx
+                distributed_sampler = DistributedSampler(dataset_train, shuffle=True)
+                batch_sampler = GraphIdxBatchSampler(
+                    dataset=dataset_train,
+                    batch_size=configs.batch_size_training,
+                    sampler=distributed_sampler,
+                    drop_last=False,
+                )
+
+                train_dataloader = torch.utils.data.DataLoader(
+                    dataset_train,
+                    num_workers=1,
+                    pin_memory=True,
+                    collate_fn=collator,
+                    batch_sampler=batch_sampler,
+                )
+            else:
+                # Original sampling behavior
+                train_dataloader = torch.utils.data.DataLoader(
+                    dataset_train,
+                    num_workers=1,
+                    shuffle=False,
+                    pin_memory=True,
+                    batch_size=configs.batch_size_training,
+                    collate_fn=collator,
+                    sampler=DistributedSampler(dataset_train, shuffle=True),
+                )
 
             # the sampler is deterministic even if shuffle is set to True
             # so we have shuffled the dataset when it's constructed (at every epoch).

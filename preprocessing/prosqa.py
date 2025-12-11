@@ -64,7 +64,9 @@ class DAG:
         # --- Step 1: Assign each node to a layer ---
         # To ensure the graph can span all layers, we can optionally place the first
         # two nodes in the first and last layers respectively.
-        assert num_nodes >= num_layers, "Number of nodes need to be larger than number of layers!"
+        assert (
+            num_nodes >= num_layers
+        ), "Number of nodes need to be larger than number of layers!"
         for i in range(num_layers):
             node_layers[i] = i
         nodes_to_assign = list(range(num_layers, num_nodes))
@@ -143,9 +145,7 @@ class DAG:
         if self.paths[a][b] is None:
             paths = []
             for c in self.edges[a]:
-                paths.extend(
-                    [[a] + path for path in self.get_paths_between(c, b)]
-                )
+                paths.extend([[a] + path for path in self.get_paths_between(c, b)])
             self.paths[a][b] = paths
 
         return self.paths[a][b]
@@ -159,6 +159,7 @@ def generate_query_from_dag(
     answer_format: str = "{#1} is a {#2}.",
     prefix_non_roots: str = "Every ",
     length: int = -1,
+    num_chains: int = -1,
     verbose: bool = False,
 ) -> str:
     if entities is None:
@@ -171,21 +172,18 @@ def generate_query_from_dag(
     if length == -1:
         length = max(dag.layers)
 
-    pairs = [
-        (a, b)
-        for a in dag.layer_map[0]
-        for b in dag.layer_map[length]
-    ]
+    pairs = [(a, b) for a in dag.layer_map[0] for b in dag.layer_map[length]]
     random.shuffle(pairs)
 
     for a, b in pairs:
         try:
             # generate the path
             paths = dag.get_paths_between(a, b)
-            path = paths[random.randint(0, len(paths) - 1)]
+            if num_chains != -1:
+                paths = random.sample(paths, num_chains)
 
             # turn into query
-            a, b, c = path[0], path[-1], -1
+            c = -1
             descendants = dag.get_descendants(a)
 
             index = random.randint(
@@ -221,19 +219,20 @@ def generate_query_from_dag(
                 .replace("{#3}", entities[c])
             )
 
-            chain = []
-            for i in range(1, len(path)):
-                chain.append(
-                    info_format.replace("{#1}", entities[path[i - 1]]).replace(
-                        "{#2}", entities[path[i]]
+            chains = [[] for _ in paths]
+            for path in paths:
+                for i in range(1, len(path)):
+                    chains.append(
+                        info_format.replace("{#1}", entities[path[i - 1]]).replace(
+                            "{#2}", entities[path[i]]
+                        )
                     )
-                )
 
             answer = answer_format.replace("{#1}", entities[a]).replace(
                 "{#2}", entities[b]
             )
 
-            return (a, b, c), context, question, chain, answer
+            return (a, b, c), context, question, chains, answer
         except Exception as e:
             if verbose:
                 print(e)

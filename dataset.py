@@ -39,6 +39,7 @@ def get_dataset(path, tokenizer, max_size=1000000000):
             "steps_tokenized": steps_tokenized,
             "answer_tokenized": answer_tokenized,
             "idx": sample["idx"],
+            "graph_idx": sample["graph_idx"],
         }
         return sample
 
@@ -309,6 +310,7 @@ def get_cot_latent_dataset(
             "labels": labels,
             "attention_mask": [1] * len(tokens),
             "idx": sample["idx"],
+            "graph_idx": sample["graph_idx"],
             "position_ids": list(range(len(tokens))),
         }
 
@@ -344,6 +346,7 @@ def generate_dataset(
     num_edges: Tuple[int, int],
     names: str,
     entities: str,
+    num_chains: int = 1,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     with open(names, "r") as file:
@@ -351,7 +354,7 @@ def generate_dataset(
     with open(entities, "r") as file:
         entities = file.readlines()
 
-    def generate_sample(idx: int) -> dict:
+    def generate_samples(idx: int) -> dict:
         """
         Args:
             idx (int): The index of the sample to generate.
@@ -374,28 +377,48 @@ def generate_dataset(
                 ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
 
                 labels = sample_names_for_dag(dag, names, entities)
-                nodes, context, question, chain, answer = generate_query_from_dag(
-                    dag, labels, length=n_layers-1
+                nodes, context, question, chains, answer = generate_query_from_dag(
+                    dag,
+                    labels,
+                    length=n_layers - 1,
+                    num_chains=num_chains,
                 )
+                if not isinstance(chains[0], list):
+                    chains = [chains]
+
                 break
             except KeyboardInterrupt:
                 raise
             except:
                 continue
 
-        sample = {
-            "edges": [(i, item) for i, sublist in enumerate(dag.edges) for item in sublist],
-            "root": nodes[0],
-            "target": nodes[1],
-            "neg_target": nodes[2],
-            "idx_to_symbol": labels,
-            "question": context + " " + question,
-            "steps": chain,
-            "answer": answer,
-            "idx": idx,
-        }
-        return sample
+        return [
+            {
+                "edges": [
+                    (i, item) for i, sublist in enumerate(dag.edges) for item in sublist
+                ],
+                "root": nodes[0],
+                "target": nodes[1],
+                "neg_target": nodes[2],
+                "idx_to_symbol": labels,
+                "question": context + " " + question,
+                "steps": chain,
+                "answer": answer,
+                "graph_idx": idx,
+            }
+            for chain in chains
+        ]
 
-    dataset = [generate_sample(idx) for idx in tqdm(range(size), desc="Generating samples")]
+    dataset = []
+    sample_id_counter = itertools.count()
+
+    for graph_idx in tqdm(range(size), desc="Generating samples"):
+        batch = generate_samples(graph_idx)
+
+        for sample in batch:
+            sample["idx"] = next(sample_id_counter)
+
+        dataset.extend(batch)
+
     with open(path, "w") as f:
         json.dump(dataset, f)
