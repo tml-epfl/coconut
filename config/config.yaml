@@ -3,7 +3,7 @@ defaults:
   - data: prosqa_file
   - method: coconut
   - model: gpt2_scratch_small
-  - training: prosqa_coconut
+  - training: coconut
   - _self_
 
 hydra:

@@ -1,3 +1,4 @@
+# Evaluation settings (shared across datasets)
 c_thought: 1
 epochs_per_stage: 5
 max_latent_stage: 6

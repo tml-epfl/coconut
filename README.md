@@ -53,13 +53,13 @@ defaults:
   - data: prosqa_file
   - method: coconut
   - model: gpt2_scratch_small
-  - training: prosqa_coconut
+  - training: coconut
 ```
 
 Swap any component from the command line, e.g. `run=gsm_coconut` or `method=cot`:
 
 ```
-torchrun --nnodes 1 --nproc_per_node N_GPUS run.py run=gsm_coconut data=gsm_file method=coconut model=gpt2_pretrained training=gsm_coconut
+torchrun --nnodes 1 --nproc_per_node N_GPUS run.py run=gsm_coconut data=gsm_file method=coconut model=gpt2_pretrained training=coconut training.c_thought=2 training.epochs_per_stage=3 training.max_latent_stage=3 training.gradient_accumulation_steps=1 training.num_epochs=25
 ```
 
 The table below maps each legacy YAML to the grouped overrides you should pass. Add your own checkpoint paths for the rows that specify `load_model_path`.
@@ -67,17 +67,17 @@ The table below maps each legacy YAML to the grouped overrides you should pass. 
 | Legacy YAML | Hydra groups to set | Extra CLI flags |
 | --- | --- | --- |
 | `args/prosqa_coconut.yaml` | *(defaults)* | |
-| `args/prosqa_coconut_eval.yaml` | `run=prosqa_coconut_eval`, `data=prontoqa_file`, `training=prosqa_eval` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/prosqa_coconut_eval.yaml` | `run=prosqa_coconut_eval`, `data=prontoqa_file`, `training=eval` | `load_model_path=/path/to/coconut/checkpoint` |
 | `args/prosqa_coconut_reversed.yaml` | `run=prosqa_coconut_reversed`, `method=coconut_reversed` | |
 | `args/synthetic_coconut.yaml` | `run=synthetic_coconut`, `data=synthetic` | |
 | `args/synthetic_coconut_reversed.yaml` | `run=synthetic_coconut_reversed`, `data=synthetic`, `method=coconut_reversed` | |
 For synthetic runs, set `dataset.online: true` to resample generated train/validation data at the start of each epoch, or `false` to reuse the same generated files across epochs.
-| `args/prosqa_cot.yaml` | `run=prosqa_cot`, `method=cot`, `training=prosqa_cot` | |
-| `args/prontoqa_coconut.yaml` | `run=prontoqa_coconut`, `data=prontoqa_file`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | |
-| `args/prontoqa_coconut_eval.yaml` | `run=prontoqa_coconut_eval`, `data=prontoqa_eval`, `model=gpt2_pretrained`, `training=prontoqa_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
-| `args/gsm_coconut.yaml` | `run=gsm_coconut`, `data=gsm_file`, `model=gpt2_pretrained`, `training=gsm_coconut` | `load_model_path=/path/to/cot/checkpoint` |
-| `args/gsm_coconut_eval.yaml` | `run=gsm_coconut_eval`, `data=gsm_eval`, `model=gpt2_pretrained`, `training=gsm_coconut` | `load_model_path=/path/to/coconut/checkpoint` |
-| `args/gsm_cot.yaml` | `run=gsm_cot`, `data=gsm_file`, `method=cot`, `model=gpt2_pretrained`, `training=gsm_cot` | |
+| `args/prosqa_cot.yaml` | `run=prosqa_cot`, `method=cot`, `training=cot` | |
+| `args/prontoqa_coconut.yaml` | `run=prontoqa_coconut`, `data=prontoqa_file`, `model=gpt2_pretrained`, `training=coconut`, `training.gradient_accumulation_steps=1` | |
+| `args/prontoqa_coconut_eval.yaml` | `run=prontoqa_coconut_eval`, `data=prontoqa_eval`, `model=gpt2_pretrained`, `training=eval` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/gsm_coconut.yaml` | `run=gsm_coconut`, `data=gsm_file`, `model=gpt2_pretrained`, `training=coconut` | `training.c_thought=2`, `training.epochs_per_stage=3`, `training.max_latent_stage=3`, `training.gradient_accumulation_steps=1`, `training.num_epochs=25`, `load_model_path=/path/to/cot/checkpoint` |
+| `args/gsm_coconut_eval.yaml` | `run=gsm_coconut_eval`, `data=gsm_eval`, `model=gpt2_pretrained`, `training=eval` | `load_model_path=/path/to/coconut/checkpoint` |
+| `args/gsm_cot.yaml` | `run=gsm_cot`, `data=gsm_file`, `method=cot`, `model=gpt2_pretrained`, `training=cot` | `training.epochs_per_stage=1`, `training.max_latent_stage=0`, `training.reset_optimizer=false`, `training.gradient_accumulation_steps=1`, `training.num_epochs=25` |
 
 You can still combine additional overrides (for example `uniform_prob=0.3` or `save_only_improve=true`) on the same command line. The historical `args/` directory is kept for reference only.
 
@@ -154,7 +154,12 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=gsm_file \
   method=cot \
   model=gpt2_pretrained \
-  training=gsm_cot
+  training=cot \
+  training.epochs_per_stage=1 \
+  training.max_latent_stage=0 \
+  training.reset_optimizer=false \
+  training.gradient_accumulation_steps=1 \
+  training.num_epochs=25
 ```
 
 Stage 1 Coconut (initialize from the CoT checkpoint):
@@ -165,7 +170,12 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=gsm_file \
   method=coconut \
   model=gpt2_pretrained \
-  training=gsm_coconut \
+  training=coconut \
+  training.c_thought=2 \
+  training.epochs_per_stage=3 \
+  training.max_latent_stage=3 \
+  training.gradient_accumulation_steps=1 \
+  training.num_epochs=25 \
   load_model_path=/path/to/cot/checkpoint
 ```
 
@@ -177,7 +187,7 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=gsm_eval \
   method=coconut \
   model=gpt2_pretrained \
-  training=gsm_coconut \
+  training=eval \
   load_model_path=/path/to/coconut/checkpoint
 ```
 
@@ -204,7 +214,8 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=prontoqa_file \
   method=coconut \
   model=gpt2_pretrained \
-  training=prontoqa_coconut
+  training=coconut \
+  training.gradient_accumulation_steps=1
 ```
 
 Evaluation:
@@ -215,7 +226,7 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=prontoqa_eval \
   method=coconut \
   model=gpt2_pretrained \
-  training=prontoqa_coconut \
+  training=eval \
   load_model_path=/path/to/coconut/checkpoint
 ```
 
@@ -237,7 +248,7 @@ torchrun --nnodes 1 --nproc_per_node 4 run.py \
   data=prontoqa_file \
   method=coconut \
   model=gpt2_scratch_small \
-  training=prosqa_eval \
+  training=eval \
   load_model_path=/path/to/coconut/checkpoint
 ```
 
