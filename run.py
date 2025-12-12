@@ -267,6 +267,9 @@ def _prepare_attempt(
         manifest: Dict[str, Any] = {
             "signature": signature,
             "attempt_id": attempt_id,
+            "run_id": attempt_id,
+            "experiment_name": _to_container(getattr(configs, "experiment_name", None)),
+            "outputs_root": _to_container(getattr(configs, "outputs_root", None)),
             "status": "running",
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
@@ -285,6 +288,13 @@ def _prepare_attempt(
         manifest = selected["manifest"] or {}
         manifest.setdefault("signature", signature)
         manifest["attempt_id"] = attempt_id
+        manifest["run_id"] = attempt_id
+        manifest["experiment_name"] = _to_container(
+            getattr(configs, "experiment_name", manifest.get("experiment_name"))
+        )
+        manifest["outputs_root"] = _to_container(
+            getattr(configs, "outputs_root", manifest.get("outputs_root"))
+        )
         manifest["status"] = "running"
         manifest["updated_at"] = _now_iso()
         manifest["git"] = git_metadata
@@ -349,22 +359,18 @@ def main(cfg: DictConfig):
     if rank == 0:
         print("Config:", OmegaConf.to_container(cfg, resolve=True))
 
-    merged_dict = {}
-    run_section = None
+    merged_dict: Dict[str, Any] = {}
     has_sections = False
+    # Hydra composes config groups under their group names (e.g., run/data/method/...).
+    # We flatten these sections into a single config namespace for easier downstream usage.
     for section in ["run", "data", "method", "model", "training"]:
         if section in cfg:
             has_sections = True
             section_dict = OmegaConf.to_container(cfg[section], resolve=True)
-            if section == "run":
-                run_section = section_dict
             merged_dict.update(section_dict)
 
     if not has_sections:
         raise ValueError("No configuration sections found to merge.")
-
-    if run_section is not None:
-        merged_dict["run"] = run_section
 
     configs = OmegaConf.create(merged_dict)
 
@@ -375,7 +381,31 @@ def main(cfg: DictConfig):
             return False
         return str(path).strip() != ""
 
-    set_seed(configs.run.seed)
+    # Seed is provided via run config (and flattened above).
+    set_seed(configs.seed)
+
+    experiment_name = getattr(configs, "experiment_name", None)
+    if not experiment_name or str(experiment_name).strip() == "":
+        raise ValueError(
+            "Missing required config key 'experiment_name'. "
+            "Provide it via the `run=` Hydra group (e.g., run=train experiment_name=prosqa)."
+        )
+
+    outputs_root = getattr(configs, "outputs_root", None) or "outputs/experiments"
+    configs.outputs_root = outputs_root
+    configs.experiment_name = experiment_name
+
+    if rank == 0:
+        deprecated = []
+        for key in ("project", "name", "save_path"):
+            if getattr(configs, key, None) is not None:
+                deprecated.append(key)
+        if deprecated:
+            print(
+                "Warning: deprecated config keys are present but ignored for output "
+                f"paths/wandb naming: {deprecated}. "
+                "Use `run=` configs instead."
+            )
 
     signature_ignore_keys = set(getattr(configs, "signature_ignore_keys", []))
     signature_ignore_keys.update(
@@ -388,6 +418,14 @@ def main(cfg: DictConfig):
             "run.resume_mode",
             "resume_attempt_id",
             "run.resume_attempt_id",
+            # new experiment/run naming keys should not affect the config signature
+            "experiment_name",
+            "outputs_root",
+            "wandb_entity",
+            # legacy keys that we no longer use
+            "name",
+            "save_path",
+            "project",
         }
     )
 
@@ -396,13 +434,12 @@ def main(cfg: DictConfig):
         configs,
         ignore_keys=signature_ignore_keys,
         git_metadata=git_metadata,
-        extra={"name": configs.name},
     )
 
     resume_mode = getattr(configs, "resume_mode", "auto")
     resume_attempt_id = getattr(configs, "resume_attempt_id", None)
 
-    signature_root = Path(configs.save_path) / configs.name / experiment_signature
+    signature_root = Path(outputs_root) / str(experiment_name) / experiment_signature
 
     attempt_info: Optional[Dict[str, Any]] = None
     if rank == 0:
@@ -443,17 +480,14 @@ def main(cfg: DictConfig):
         atexit.register(_ensure_manifest_failure)
 
     configs.experiment_signature = experiment_signature
+    configs.run_id = attempt_info["attempt_id"]
+    configs.run_dir = save_dir
+    # Backwards compatible aliases (older code/logging used attempt_*)
     configs.attempt_id = attempt_info["attempt_id"]
     configs.attempt_path = save_dir
     configs.manifest_path = manifest_path
     configs.signature_root = str(signature_root)
     configs.config_snapshot_path = config_snapshot_path
-    if "run" in configs and isinstance(configs.run, DictConfig):
-        configs.run.experiment_signature = experiment_signature
-        configs.run.attempt_id = attempt_info["attempt_id"]
-        configs.run.attempt_path = save_dir
-        configs.run.signature_root = str(signature_root)
-        configs.run.config_snapshot_path = config_snapshot_path
 
     if configs.data_type == "synthetic":
         synthetic_data_dir = Path(save_dir) / "data"
@@ -464,9 +498,6 @@ def main(cfg: DictConfig):
         val_path = synthetic_data_dir / "validation.json"
         configs.train_path = str(train_path)
         configs.val_path = str(val_path)
-        if "run" in configs and isinstance(configs.run, DictConfig):
-            configs.run.train_path = configs.train_path
-            configs.run.val_path = configs.val_path
 
     user_requested_resume = configs.resume != 0
     if rank == 0:
@@ -490,9 +521,6 @@ def main(cfg: DictConfig):
             )
         configs.resume = resume_epoch
         configs.load_model_path = latest_checkpoint_path
-        if "run" in configs and isinstance(configs.run, DictConfig):
-            configs.run.resume = resume_epoch
-            configs.run.load_model_path = latest_checkpoint_path
         print(f"Loading from previous run epoch_{configs.resume}!")
     elif user_requested_resume and configs.resume != 0:
         if not has_load_path(configs.load_model_path):
@@ -657,16 +685,17 @@ def main(cfg: DictConfig):
             del configs_train["online"]
             _generate_dataset(configs.train_path, **configs_train)
 
-    # prepare the ground truth answer and cot for evaluation
-    question_val = [d["question"] for d in json.load(open(configs.val_path))]
-    answers_val = [
-        d["answer"].replace(",", "").strip() for d in json.load(open(configs.val_path))
-    ]
-    cot_val = ["\n".join(d["steps"]) for d in json.load(open(configs.val_path))]
+    def _load_val_gt():
+        data = json.load(open(configs.val_path))
+        question_val = [d["question"] for d in data]
+        answers_val = [d["answer"].replace(",", "").strip() for d in data]
+        cot_val = ["\n".join(d["steps"]) for d in data]
+        return question_val, answers_val, cot_val
 
-    base_dataset_valid = get_dataset(
-        configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
-    )
+    # prepare the ground truth answer and cot for evaluation
+    question_val, answers_val, cot_val = _load_val_gt()
+
+    base_dataset_valid = get_dataset(configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000)
 
     if not configs.only_eval:
         base_dataset_train = get_dataset(
@@ -688,7 +717,11 @@ def main(cfg: DictConfig):
             wandb_entity = None
         wandb_entity = wandb_entity or os.environ.get("WANDB_ENTITY")
 
-        wandb_kwargs = {"project": configs.project, "name": configs.name}
+        wandb_kwargs = {
+            "project": str(configs.experiment_name),
+            "name": str(experiment_signature),
+            "group": str(experiment_signature),
+        }
         if wandb_entity:
             wandb_kwargs["entity"] = wandb_entity
 
@@ -698,8 +731,12 @@ def main(cfg: DictConfig):
         )
         wandb_run.config.update(
             {
+                "experiment_name": str(configs.experiment_name),
+                "outputs_root": str(configs.outputs_root),
                 "experiment_signature": experiment_signature,
-                "attempt_id": attempt_info["attempt_id"],
+                "run_id": attempt_info["attempt_id"],
+                "run_dir": save_dir,
+                "attempt_id": attempt_info["attempt_id"],  # legacy alias
                 "resume_mode": resume_mode,
                 "resume_attempt_id": resume_attempt_id,
             },
@@ -736,18 +773,12 @@ def main(cfg: DictConfig):
             and configs.dataset.get("online", True)
         ):
             _generate_dataset(configs.val_path, **configs_valid)
-            base_dataset_valid = get_dataset(
-                configs.val_path,
-                tokenizer,
-                max_size=32 if configs.debug else 100000000,
-            )
+            question_val, answers_val, cot_val = _load_val_gt()   # <-- critical
+            base_dataset_valid = get_dataset(configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000)
+
             if not configs.only_eval:
                 _generate_dataset(configs.train_path, **configs_train)
-                base_dataset_train = get_dataset(
-                    configs.train_path,
-                    tokenizer,
-                    max_size=5000 if configs.debug else 100000000,
-                )
+                base_dataset_train = get_dataset(configs.train_path, tokenizer, max_size=5000 if configs.debug else 100000000)
 
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage

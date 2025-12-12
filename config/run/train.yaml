@@ -1,4 +1,5 @@
-project: coconut
+experiment_name: synthetic
+outputs_root: outputs/experiments
 seed: 0
 debug: false
 bf16: false
@@ -6,10 +7,7 @@ resume: 0
 save_only_improve: false
 load_model_path: null
 only_eval: false
-name: synthetic-cot
-save_path: outputs/synthetic/cot
 wandb_entity: tml-coconut
-
 resume_mode: auto
 resume_attempt_id: null
 signature_ignore_keys: []

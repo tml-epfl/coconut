@@ -1,6 +1,6 @@
 defaults:
-  - run: prosqa_coconut
-  - data: prosqa_file
+  - run: train
+  - data: synthetic
   - method: coconut
   - model: gpt2_scratch_small
   - training: coconut
