@@ -9,5 +9,6 @@ dataset:
   num_nodes: [16, 24]
   num_layers: [3, 6]
   num_edges: [20, 60]
+  dist: unif
   online: True
 

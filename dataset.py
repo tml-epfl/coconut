@@ -346,6 +346,7 @@ def generate_dataset(
     num_edges: Tuple[int, int],
     names: str,
     entities: str,
+    dist: str = "gauss",  # "gauss", "unif"
     num_chains: int = 1,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
@@ -362,11 +363,18 @@ def generate_dataset(
         Returns:
             dict: A dictionary with "question", "steps", and "answer" keys.
         """
+        if dist == "gauss":
+            dist_fn = random.gauss
+        elif dist == "unif":
+            dist_fn = random.randint
+
         while True:
             try:
-                n_nodes = random.randint(num_nodes[0], num_nodes[1])
-                n_layers = random.randint(num_layers[0], num_layers[1])
-                n_edges = random.randint(num_edges[0], num_edges[1])
+                n_nodes = int(dist_fn(num_nodes[0], num_nodes[1]))
+                n_layers = int(dist_fn(num_layers[0], num_layers[1]))
+                n_edges = int(dist_fn(num_edges[0], num_edges[1]))
+                print(n_nodes, n_layers, n_edges)
+
                 dag = DAG.generate_layered_dag(
                     num_nodes=n_nodes,
                     num_layers=n_layers,
