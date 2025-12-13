@@ -373,7 +373,6 @@ def generate_dataset(
                 n_nodes = int(dist_fn(num_nodes[0], num_nodes[1]))
                 n_layers = int(dist_fn(num_layers[0], num_layers[1]))
                 n_edges = int(dist_fn(num_edges[0], num_edges[1]))
-                print(n_nodes, n_layers, n_edges)
 
                 dag = DAG.generate_layered_dag(
                     num_nodes=n_nodes,
