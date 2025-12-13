@@ -162,6 +162,10 @@ def generate_query_from_dag(
     num_chains: int = -1,
     verbose: bool = False,
 ) -> str:
+    assert (
+        num_chains == -1 or num_chains > 0
+    ), "`num_chains` needs to be either -1 (all) or some positive integer"
+
     if entities is None:
         entities = [f"ent{i}" for i in range(len(dag.nodes))]
     entities = [
@@ -181,6 +185,7 @@ def generate_query_from_dag(
             paths = dag.get_paths_between(a, b)
             if num_chains != -1:
                 paths = random.sample(paths, num_chains)
+            assert len(paths) > 0
 
             # turn into query
             c = -1
@@ -220,9 +225,9 @@ def generate_query_from_dag(
             )
 
             chains = [[] for _ in paths]
-            for path in paths:
+            for idx, path in enumerate(paths):
                 for i in range(1, len(path)):
-                    chains.append(
+                    chains[idx].append(
                         info_format.replace("{#1}", entities[path[i - 1]]).replace(
                             "{#2}", entities[path[i]]
                         )

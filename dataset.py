@@ -383,9 +383,6 @@ def generate_dataset(
                     length=n_layers - 1,
                     num_chains=num_chains,
                 )
-                if not isinstance(chains[0], list):
-                    chains = [chains]
-
                 break
             except KeyboardInterrupt:
                 raise
