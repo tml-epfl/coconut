@@ -302,7 +302,7 @@ def get_cot_latent_dataset(
         ]
         labels = [
             -100 if token in [start_id, latent_id, end_id] else token
-            for token in tokens
+            for token in labels
         ]
 
         return {
