@@ -352,7 +352,9 @@ def generate_dataset(
     entities: str,
     dist: str = "gauss",  # "gauss", "unif"
     length: int = -1,
+    min_length: int = 1,
     neg_length: int = -1,
+    min_neg_length: int = 1,
     num_chains: int = 1,
     max_trials: int = 100,
 ):
@@ -370,6 +372,11 @@ def generate_dataset(
         Returns:
             dict: A dictionary with "question", "steps", and "answer" keys.
         """
+        if length > 0:
+            assert length >= min_length, f"`length` needs to be equal or larger than `min_length`"
+        if neg_length > 0:
+            assert neg_length >= min_neg_length, f"`neg_length` needs to be equal or larger than `min_neg_length`"
+
         if dist == "gauss":
             dist_fn = random.gauss
         elif dist == "unif":
@@ -379,6 +386,11 @@ def generate_dataset(
             n_nodes = round(dist_fn(num_nodes[0], num_nodes[1]))
             n_layers = round(dist_fn(num_layers[0], num_layers[1]))
             n_edges = round(dist_fn(num_edges[0], num_edges[1]))
+
+            if n_layers <= min_length:
+                n_layers = min_length + 1
+            if n_layers <= min_neg_length:
+                n_layers = min_neg_length + 1
 
             for _ in range(max_trials):
                 try:
@@ -393,9 +405,9 @@ def generate_dataset(
                     labels = sample_names_for_dag(dag, names, entities)
 
                     # if provided 0, sample a random length
-                    _length = random.randint(1, n_layers) if length == 0 else length
+                    _length = random.randint(min_length, n_layers) if length == 0 else length
                     _neg_length = (
-                        random.randint(1, n_layers) if neg_length == 0 else neg_length
+                        random.randint(min_neg_length, n_layers) if neg_length == 0 else neg_length
                     )
 
                     nodes, context, question, chains, answer = generate_query_from_dag(

@@ -15,5 +15,7 @@ dataset:
 
   # 0 to randomly sample, -1 for max, positive for fixed length
   length: -1
+  min_length: 3
   neg_length: -1
+  min_neg_length: 1
   max_trials: 100 # maximum number of trials for rejection sampling
