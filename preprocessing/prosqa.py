@@ -183,6 +183,7 @@ def generate_query_from_dag(
     answer_format: str = "{#1} is a {#2}.",
     prefix_non_roots: str = "Every ",
     length: int = -1,
+    neg_length: int = -1,
     num_chains: int = -1,
     verbose: bool = False,
 ) -> str:
@@ -199,12 +200,16 @@ def generate_query_from_dag(
 
     if length == -1:
         length = max(dag.layers)
+    if neg_length == -1:
+        neg_length = max(dag.layers)
 
-    pairs = [(a, b) for a in dag.layer_map[0] for b in dag.layer_map[length]]
+    pairs = [(a, b, c) for a in dag.layer_map[0] for b in dag.layer_map[length] for c in dag.layer_map[neg_length]]
     random.shuffle(pairs)
 
-    for a, b in pairs:
+    for a, b, c in pairs:
         try:
+            assert a != b and b != c and c != a
+
             # generate the path
             paths = dag.get_paths_between(a, b)
             if num_chains != -1:
@@ -212,19 +217,8 @@ def generate_query_from_dag(
             assert len(paths) > 0
 
             # turn into query
-            c = -1
             descendants = dag.get_descendants(a)
-
-            index = random.randint(
-                0,
-                len(dag.nodes) - len(descendants) - len(dag.layer_map[0]) - 2,
-            )
-            assert index >= 0
-
-            while index > 0 or c == -1:
-                while (c in descendants) or (dag.layers[c] == 0) or c == b or c == -1:
-                    c += 1
-                index -= 1
+            assert not (c in descendants)
 
             # prepare the strings
             context = []

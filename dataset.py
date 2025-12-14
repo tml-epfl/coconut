@@ -351,6 +351,8 @@ def generate_dataset(
     names: str,
     entities: str,
     dist: str = "gauss",  # "gauss", "unif"
+    length: int = -1,
+    neg_length: int = -1,
     num_chains: int = 1,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
@@ -391,7 +393,8 @@ def generate_dataset(
                 nodes, context, question, chains, answer = generate_query_from_dag(
                     dag,
                     labels,
-                    length=n_layers - 1,
+                    length=length,
+                    neg_length=neg_length,
                     num_chains=num_chains,
                 )
                 break
