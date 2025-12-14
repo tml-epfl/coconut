@@ -354,6 +354,7 @@ def generate_dataset(
     length: int = -1,
     neg_length: int = -1,
     num_chains: int = 1,
+    max_trials: int = 100,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     with open(names, "r") as file:
@@ -375,56 +376,56 @@ def generate_dataset(
             dist_fn = random.randint
 
         while True:
-            try:
-                n_nodes = int(dist_fn(num_nodes[0], num_nodes[1]))
-                n_layers = int(dist_fn(num_layers[0], num_layers[1]))
-                n_edges = int(dist_fn(num_edges[0], num_edges[1]))
+            n_nodes = round(dist_fn(num_nodes[0], num_nodes[1]))
+            n_layers = round(dist_fn(num_layers[0], num_layers[1]))
+            n_edges = round(dist_fn(num_edges[0], num_edges[1]))
 
-                dag = DAG.generate_layered_dag(
-                    num_nodes=n_nodes,
-                    num_layers=n_layers,
-                    num_edges=n_edges,
-                )
-                assert (
-                    sum([len(e) for e in dag.edges]) == n_edges
-                ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
-                labels = sample_names_for_dag(dag, names, entities)
+            for _ in range(max_trials):
+                try:
+                    dag = DAG.generate_layered_dag(
+                        num_nodes=n_nodes,
+                        num_layers=n_layers,
+                        num_edges=n_edges,
+                    )
+                    assert (
+                        sum([len(e) for e in dag.edges]) == n_edges
+                    ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
+                    labels = sample_names_for_dag(dag, names, entities)
 
-                # if provided 0, sample a random length
-                _length = random.randint(1, n_layers) if length == 0 else length
-                _neg_length = (
-                    random.randint(1, n_layers) if neg_length == 0 else neg_length
-                )
+                    # if provided 0, sample a random length
+                    _length = random.randint(1, n_layers) if length == 0 else length
+                    _neg_length = (
+                        random.randint(1, n_layers) if neg_length == 0 else neg_length
+                    )
 
-                nodes, context, question, chains, answer = generate_query_from_dag(
-                    dag,
-                    labels,
-                    length=_length,
-                    neg_length=_neg_length,
-                    num_chains=num_chains,
-                )
-                break
-            except KeyboardInterrupt:
-                raise
-            except:
-                continue
-
-        return [
-            {
-                "edges": [
-                    (i, item) for i, sublist in enumerate(dag.edges) for item in sublist
-                ],
-                "root": nodes[0],
-                "target": nodes[1],
-                "neg_target": nodes[2],
-                "idx_to_symbol": labels,
-                "question": context + " " + question,
-                "steps": chain,
-                "answer": answer,
-                "graph_idx": idx,
-            }
-            for chain in chains
-        ]
+                    nodes, context, question, chains, answer = generate_query_from_dag(
+                        dag,
+                        labels,
+                        length=_length,
+                        neg_length=_neg_length,
+                        num_chains=num_chains,
+                    )
+                    
+                    return [
+                        {
+                            "edges": [
+                                (i, item) for i, sublist in enumerate(dag.edges) for item in sublist
+                            ],
+                            "root": nodes[0],
+                            "target": nodes[1],
+                            "neg_target": nodes[2],
+                            "idx_to_symbol": labels,
+                            "question": context + " " + question,
+                            "steps": chain,
+                            "answer": answer,
+                            "graph_idx": idx,
+                        }
+                        for chain in chains
+                    ]
+                except KeyboardInterrupt:
+                    raise
+                except:
+                    continue
 
     dataset = []
     sample_id_counter = itertools.count()
