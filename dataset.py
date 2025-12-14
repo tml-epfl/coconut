@@ -388,13 +388,19 @@ def generate_dataset(
                 assert (
                     sum([len(e) for e in dag.edges]) == n_edges
                 ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
-
                 labels = sample_names_for_dag(dag, names, entities)
+
+                # if provided 0, sample a random length
+                _length = random.randint(1, n_layers) if length == 0 else length
+                _neg_length = (
+                    random.randint(1, n_layers) if neg_length == 0 else neg_length
+                )
+
                 nodes, context, question, chains, answer = generate_query_from_dag(
                     dag,
                     labels,
-                    length=length,
-                    neg_length=neg_length,
+                    length=_length,
+                    neg_length=_neg_length,
                     num_chains=num_chains,
                 )
                 break

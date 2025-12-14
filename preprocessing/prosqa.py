@@ -203,7 +203,12 @@ def generate_query_from_dag(
     if neg_length == -1:
         neg_length = max(dag.layers)
 
-    pairs = [(a, b, c) for a in dag.layer_map[0] for b in dag.layer_map[length] for c in dag.layer_map[neg_length]]
+    pairs = [
+        (a, b, c)
+        for a in dag.layer_map[0]
+        for b in dag.layer_map[length]
+        for c in dag.layer_map[neg_length]
+    ]
     random.shuffle(pairs)
 
     for a, b, c in pairs:
