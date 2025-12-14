@@ -914,7 +914,9 @@ def main(cfg: DictConfig):
 
                 total_train_steps += 1
                 batch = {
-                    key: batch[key].to(rank) for key in batch.keys() if key != "idx"
+                    key: batch[key].to(rank)
+                    for key in batch.keys()
+                    if key not in ("idx", "graph_idx")
                 }
 
                 outputs = parallel_model(**batch)
