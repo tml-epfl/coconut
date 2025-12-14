@@ -972,7 +972,9 @@ def main(cfg: DictConfig):
                 parallel_model.module.eval()
                 for step, batch in enumerate(valid_loss_dataloader):
                     batch = {
-                        key: batch[key].to(rank) for key in batch.keys() if key != "idx"
+                        key: batch[key].to(rank)
+                        for key in batch.keys()
+                        if key not in ("idx", "graph_idx")
                     }
 
                     outputs = parallel_model(**batch)
