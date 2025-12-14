@@ -128,6 +128,72 @@ class DAG:
             graph[edge[0]].append(edge[1])
         return DAG(list(graph.keys()), node_layers, list(graph.values()))
 
+    @staticmethod
+    def generate_prosqa_dag(
+        num_nodes: int,
+        poisson_coeff: float = 1.5,
+        prob_coeff: float = 0.3,
+        depth_coeff: float = 1.5,
+    ):
+        """
+        Generates a Directed Acyclic Graph (DAG) with a layered structure
+        based on ProsQA pseudo code.
+        """
+        assert prob_coeff < 0.5, "`prob_coeff` needs to be smaller than 0.5"
+
+        nodes = [0, 1]
+        edges = {0: [], 1: []}
+        labels = {0: 1, 1: 2}
+        depth = {0: 0, 1: 0}
+        groups = {0: [], 1: [0], 2: [1], 3: []}
+        for i in range(2, num_nodes):
+            num_parents = np.random.poisson(poisson_coeff)
+            rand = np.random.random()
+
+            if rand <= prob_coeff:
+                candidates = groups[0] + groups[1]
+            elif rand <= 2 * prob_coeff:
+                candidates = groups[0] + groups[2]
+            else:
+                candidates = nodes
+
+            num_parents = min(len(candidates), num_parents)
+            weights = np.asarray([depth[c] * depth_coeff + 1 for c in candidates])
+            parents = np.random.choice(
+                candidates, num_parents, p=weights / np.sum(weights)
+            )
+
+            # compute the label
+            _labels = [labels[parent] for parent in parents]
+            if 1 in _labels and 2 in _labels:
+                _label = 3
+            elif 1 in _labels:
+                _label = 1
+            elif 2 in labels:
+                _label = 2
+            else:
+                _label = 0
+
+            # compute the depth
+            _depths = [depth[parent] for parent in parents]
+            _depth = 0 if len(_depths) == 0 else min(_depths) + 1
+
+            # add edges
+            for parent in parents:
+                edges[parent].append(i)
+
+            nodes.append(i)
+            edges[i] = []
+            depth[i] = _depth
+            labels[i] = _label
+            groups[_label].append(i)
+
+        return DAG(
+            list(edges.keys()),
+            [depth[i] for i in range(num_nodes)],
+            list(edges.values()),
+        )
+
     def __init__(
         self,
         nodes: List[int],

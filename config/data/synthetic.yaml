@@ -2,6 +2,7 @@ data_type: synthetic
 train_path: null
 val_path: null
 dataset:
+  method: tml
   online: True
   size:
     train: 17886

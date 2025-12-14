@@ -345,6 +345,7 @@ def get_cot_latent_dataset(
 def generate_dataset(
     path: str,
     size: int,
+    method: str,
     num_nodes: Tuple[int, int],
     num_layers: Tuple[int, int],
     num_edges: Tuple[int, int],
@@ -372,10 +373,18 @@ def generate_dataset(
         Returns:
             dict: A dictionary with "question", "steps", and "answer" keys.
         """
+        assert (
+            method == "tml" or method == "prosqa"
+        ), f"`method` needs to be either `tml` or `prosqa`"
+
         if length > 0:
-            assert length >= min_length, f"`length` needs to be equal or larger than `min_length`"
+            assert (
+                length >= min_length
+            ), f"`length` needs to be equal or larger than `min_length`"
         if neg_length > 0:
-            assert neg_length >= min_neg_length, f"`neg_length` needs to be equal or larger than `min_neg_length`"
+            assert (
+                neg_length >= min_neg_length
+            ), f"`neg_length` needs to be equal or larger than `min_neg_length`"
 
         if dist == "gauss":
             dist_fn = random.gauss
@@ -394,22 +403,40 @@ def generate_dataset(
 
             for _ in range(max_trials):
                 try:
-                    dag = DAG.generate_layered_dag(
-                        num_nodes=n_nodes,
-                        num_layers=n_layers,
-                        num_edges=n_edges,
-                    )
-                    assert (
-                        sum([len(e) for e in dag.edges]) == n_edges
-                    ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
-                    labels = sample_names_for_dag(dag, names, entities)
+                    if method == "tml":
+                        dag = DAG.generate_layered_dag(
+                            num_nodes=n_nodes,
+                            num_layers=n_layers,
+                            num_edges=n_edges,
+                        )
+                        assert (
+                            sum([len(e) for e in dag.edges]) == n_edges
+                        ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
+                        assert (
+                            max(dag.layers) + 1 == n_layers
+                        ), f"Number of layers {max(dag.layers) + 1} is not equal to the given quantity {n_layers}"
+                    elif method == "prosqa":
+                        dag = DAG.generate_prosqa_dag(
+                            num_nodes=n_nodes,
+                        )
+                        assert (
+                            max(dag.layers) >= min_length
+                        ), f"Number of layers {max(dag.layers) + 1} is not equal to or greater than the given quantity {min_length + 1}"
 
                     # if provided 0, sample a random length
-                    _length = random.randint(min_length, n_layers) if length == 0 else length
+                    max_length = max(dag.layers)
+                    _length = (
+                        random.randint(min_length, max_length)
+                        if length == 0
+                        else length
+                    )
                     _neg_length = (
-                        random.randint(min_neg_length, n_layers) if neg_length == 0 else neg_length
+                        random.randint(min_neg_length, max_length)
+                        if neg_length == 0
+                        else neg_length
                     )
 
+                    labels = sample_names_for_dag(dag, names, entities)
                     nodes, context, question, chains, answer = generate_query_from_dag(
                         dag,
                         labels,
@@ -417,11 +444,13 @@ def generate_dataset(
                         neg_length=_neg_length,
                         num_chains=num_chains,
                     )
-                    
+
                     return [
                         {
                             "edges": [
-                                (i, item) for i, sublist in enumerate(dag.edges) for item in sublist
+                                (i, item)
+                                for i, sublist in enumerate(dag.edges)
+                                for item in sublist
                             ],
                             "root": nodes[0],
                             "target": nodes[1],
