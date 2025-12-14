@@ -5,6 +5,7 @@ import json
 import itertools
 import random
 from dataclasses import dataclass
+from re import I
 from typing import Optional, Tuple
 from tqdm import tqdm
 
@@ -39,8 +40,9 @@ def get_dataset(path, tokenizer, max_size=1000000000):
             "steps_tokenized": steps_tokenized,
             "answer_tokenized": answer_tokenized,
             "idx": sample["idx"],
-            "graph_idx": sample["graph_idx"],
+            "graph_idx": sample["graph_idx"] if "graph_idx" in sample else sample["idx"]
         }
+
         return sample
 
     data = json.load(open(path))[:max_size]
