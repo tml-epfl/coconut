@@ -695,7 +695,9 @@ def main(cfg: DictConfig):
     # prepare the ground truth answer and cot for evaluation
     question_val, answers_val, cot_val = _load_val_gt()
 
-    base_dataset_valid = get_dataset(configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000)
+    base_dataset_valid = get_dataset(
+        configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
+    )
 
     if not configs.only_eval:
         base_dataset_train = get_dataset(
@@ -773,12 +775,18 @@ def main(cfg: DictConfig):
             and configs.dataset.get("online", True)
         ):
             _generate_dataset(configs.val_path, **configs_valid)
-            question_val, answers_val, cot_val = _load_val_gt()   # <-- critical
-            base_dataset_valid = get_dataset(configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000)
+            question_val, answers_val, cot_val = _load_val_gt()  # <-- critical
+            base_dataset_valid = get_dataset(
+                configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
+            )
 
             if not configs.only_eval:
                 _generate_dataset(configs.train_path, **configs_train)
-                base_dataset_train = get_dataset(configs.train_path, tokenizer, max_size=5000 if configs.debug else 100000000)
+                base_dataset_train = get_dataset(
+                    configs.train_path,
+                    tokenizer,
+                    max_size=5000 if configs.debug else 100000000,
+                )
 
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage

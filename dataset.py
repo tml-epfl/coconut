@@ -40,7 +40,9 @@ def get_dataset(path, tokenizer, max_size=1000000000):
             "steps_tokenized": steps_tokenized,
             "answer_tokenized": answer_tokenized,
             "idx": sample["idx"],
-            "graph_idx": sample["graph_idx"] if "graph_idx" in sample else sample["idx"]
+            "graph_idx": sample["graph_idx"]
+            if "graph_idx" in sample
+            else sample["idx"],
         }
 
         return sample

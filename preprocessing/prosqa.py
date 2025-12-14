@@ -13,6 +13,7 @@ class DAG:
         num_layers: int,
         num_edges: int,
         layer_probabilities: Optional[List[float]] = None,
+        strict: bool = True,
     ):
         """
         Generates a Directed Acyclic Graph (DAG) with a layered structure.
@@ -29,6 +30,7 @@ class DAG:
                                                         must sum to 1. If None,
                                                         assignment is uniform.
                                                         Defaults to None.
+            strict (bool): Whether to force layer for each node
 
         Returns:
             dict: An adjacency list representation of the DAG, where each key is a
@@ -95,13 +97,35 @@ class DAG:
         if num_edges > len(node_pairs):
             num_edges = len(node_pairs)
 
-        edges = random.sample(
-            population=node_pairs,
-            k=num_edges,
-        )
+        if strict:
+            edges = []
+
+            # select at least one edge per non-root nodes
+            for b in range(num_nodes):
+                node_pairs_b = [pair for pair in node_pairs if pair[-1] == b]
+                if node_layers[b] > 0:
+                    edges.append(
+                        (
+                            random.choice(node_pairs_b)[0],
+                            b,
+                        )
+                    )
+
+            # select the rest of the edges
+            edges.extend(
+                random.sample(
+                    population=[pair for pair in node_pairs if not (pair in edges)],
+                    k=num_edges - len(edges),
+                )
+            )
+        else:
+            edges = random.sample(
+                population=node_pairs,
+                k=num_edges,
+            )
+
         for edge in edges:
             graph[edge[0]].append(edge[1])
-
         return DAG(list(graph.keys()), node_layers, list(graph.values()))
 
     def __init__(
@@ -228,8 +252,11 @@ def generate_query_from_dag(
             for idx, path in enumerate(paths):
                 for i in range(1, len(path)):
                     chains[idx].append(
-                        info_format.replace("{#1}", entities[path[i - 1]]).replace(
-                            "{#2}", entities[path[i]]
+                        (prefix_non_roots if i > 1 else "")
+                        + (
+                            info_format.replace("{#1}", entities[path[i - 1]]).replace(
+                                "{#2}", entities[path[i]]
+                            )
                         )
                     )
 
