@@ -9,14 +9,14 @@ dataset:
     valid: 300
     test: 500
   # '[min, max]' for unif or '[mean, std]' for 'gauss'
-  dist: unif # 'unif' or 'gauss'
-  num_nodes: [16, 24]
-  num_layers: [3, 6]
-  num_edges: [20, 60]
+  dist: gauss # 'unif' or 'gauss'
+  num_nodes: [20, 3]
+  num_layers: [5, 1]
+  num_edges: [40, 10]
 
   # 0 to randomly sample, -1 for max, positive for fixed length
   length: -1
-  min_length: 3
+  min_length: 1
   neg_length: -1
   min_neg_length: 1
   max_trials: 100 # maximum number of trials for rejection sampling

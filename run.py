@@ -98,8 +98,6 @@ class GraphIdxBatchSampler(BatchSampler):
         self.idx_to_graph = idx_to_graph
 
     def __iter__(self) -> Iterator[List[int]]:
-        print("Calculating batches based on graph idx...")
-
         # 1. Get the current epoch's sampled indices (this is randomized/distributed each time)
         sampled_indices = list(self.sampler)
 
