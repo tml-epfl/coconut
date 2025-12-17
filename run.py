@@ -1121,6 +1121,14 @@ def main(cfg: DictConfig):
                                 path[:n_visible_steps] == visible_solution
                                 for path in paths
                             )
+
+                            # print some examples
+                            if idx < 5 and rank == 0:
+                                print(f"Symbol to idx map: {symbol_to_idx}")
+                                print(
+                                    f"Visible solution: '{visible_solution}'"
+                                )
+                                print(f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'")
                         else:
                             # Visible steps are the last n_visible_steps
                             visible_solution = solution[-n_visible_steps:]
@@ -1128,11 +1136,29 @@ def main(cfg: DictConfig):
                                 path[-n_visible_steps:] == visible_solution
                                 for path in paths
                             )
+
+                            # print some examples
+                            if idx < 5 and rank == 0:
+                                print(f"Symbol to idx map: {symbol_to_idx}")
+                                print(
+                                    f"Visible solution: '{visible_solution}'"
+                                )
+                                print(f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'")
                     else:
                         # All steps are abstracted, just check the answer
                         cor_cot += 1
                 else:
                     cor_cot += solution in paths
+
+                    # print some examples
+                    if idx < 5 and rank == 0:
+                        print(f"Symbol to idx map: {symbol_to_idx}")
+                        print(
+                            f"Visible solution: '{solution}'"
+                        )
+                        print(f"Correct traces: '{paths}'")
+
+
 
                 pbar.update(1)
                 pbar.set_description(
