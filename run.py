@@ -49,7 +49,6 @@ from utils import (
 
 MANIFEST_FILENAME = "run_manifest.yaml"
 CONFIG_SNAPSHOT_FILENAME = "config.yaml"
-PATTERN = r"Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)"
 
 
 class GraphIdxBatchSampler(BatchSampler):
@@ -1062,6 +1061,7 @@ def main(cfg: DictConfig):
                 cot_output = (
                     ("\n".join(text_output.split("\n")[1:])).split("#")[0].strip()
                 )
+                cor += answer_output == answer
 
                 if idx < 5 and rank == 0:
                     # print some examples
@@ -1071,7 +1071,9 @@ def main(cfg: DictConfig):
                     print(f"Full output: '{tokenizer.decode(outputs[0])}'")
                     print(f"Extracted Output: '{answer_output}'")
 
-                # compute the correctness of cots
+                # === compute the correctness of cots ===
+
+                # extract the related graph data
                 symbol_to_idx = {
                     symbol: idx
                     for idx, symbol in enumerate(graph_data["idx_to_symbol"])
@@ -1085,37 +1087,51 @@ def main(cfg: DictConfig):
                 paths = graph.get_paths_between(
                     graph_data["root"], graph_data["target"]
                 )
-                matches = [
-                    re.search(PATTERN, step.strip()) for step in cot_output.split("\n")
+                paths = [
+                    [(path[i - 1], path[i]) for i in range(1, len(path))]
+                    for path in paths
                 ]
-                solution = [
-                    (
-                        symbol_to_idx[match.group("x")]
-                        if match.group("x") in symbol_to_idx
-                        else -1,
-                        symbol_to_idx[match.group("y")]
-                        if match.group("y") in symbol_to_idx
-                        else -1,
-                    )
-                    if match
-                    else (-1, -1)
+
+                # process the cot outputs to the graph nodes
+                matches = [step.strip() for step in cot_output.split("\n")]
+                for pattern in configs.cot_patterns:
+                    matches = [
+                        (re.search(pattern, match) or match)
+                        if isinstance(match, str)
+                        else match
+                        for match in matches
+                    ]
+                matches_x = [
+                    -1
+                    if isinstance(match, str) or not (match.group("x") in symbol_to_idx)
+                    else symbol_to_idx[match.group("x")]
                     for match in matches
                 ]
+                matches_y = [
+                    -1
+                    if isinstance(match, str) or not (match.group("y") in symbol_to_idx)
+                    else symbol_to_idx[match.group("y")]
+                    for match in matches
+                ]
+                solution = [
+                    (match_x, match_y)
+                    for (match_x, match_y) in zip(matches_x, matches_y)
+                ]
 
-                cor += answer_output == answer
-
-                # Check CoT correctness
-                eval_with_visible_steps = getattr(configs, 'eval_with_visible_steps', False)
+                # check cot correctness
+                eval_with_visible_steps = getattr(
+                    configs, "eval_with_visible_steps", False
+                )
                 if eval_with_visible_steps:
-                    # Only validate the visible (non-abstracted) steps
-                    is_reversed = getattr(configs, 'reversed', False)
+                    # only validate visible steps
+                    is_reversed = getattr(configs, "reversed", False)
                     total_steps = len(answer_cot.split("\n"))
                     n_abstracted_steps = min(scheduled_stage, total_steps)
                     n_visible_steps = total_steps - n_abstracted_steps
 
                     if n_visible_steps > 0:
                         if is_reversed:
-                            # Visible steps are the first n_visible_steps
+                            # visible steps are the first n_visible_steps
                             visible_solution = solution[:n_visible_steps]
                             cor_cot += any(
                                 path[:n_visible_steps] == visible_solution
@@ -1125,10 +1141,10 @@ def main(cfg: DictConfig):
                             # print some examples
                             if idx < 5 and rank == 0:
                                 print(f"Symbol to idx map: {symbol_to_idx}")
+                                print(f"Visible solution: '{visible_solution}'")
                                 print(
-                                    f"Visible solution: '{visible_solution}'"
+                                    f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'"
                                 )
-                                print(f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'")
                         else:
                             # Visible steps are the last n_visible_steps
                             visible_solution = solution[-n_visible_steps:]
@@ -1140,10 +1156,10 @@ def main(cfg: DictConfig):
                             # print some examples
                             if idx < 5 and rank == 0:
                                 print(f"Symbol to idx map: {symbol_to_idx}")
+                                print(f"Visible solution: '{visible_solution}'")
                                 print(
-                                    f"Visible solution: '{visible_solution}'"
+                                    f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'"
                                 )
-                                print(f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'")
                     else:
                         # All steps are abstracted, just check the answer
                         cor_cot += 1
@@ -1153,12 +1169,8 @@ def main(cfg: DictConfig):
                     # print some examples
                     if idx < 5 and rank == 0:
                         print(f"Symbol to idx map: {symbol_to_idx}")
-                        print(
-                            f"Visible solution: '{solution}'"
-                        )
+                        print(f"Visible solution: '{solution}'")
                         print(f"Correct traces: '{paths}'")
-
-
 
                 pbar.update(1)
                 pbar.set_description(
@@ -1181,11 +1193,13 @@ def main(cfg: DictConfig):
         sys.stdout.flush()
 
         if wandb_run:
-            wandb_run.log({
-                "eval/acc": cor / total,
-                "eval/cot_em": cor_cot / total,
-                "eval/scheduled_stage": scheduled_stage,
-            })
+            wandb_run.log(
+                {
+                    "eval/acc": cor / total,
+                    "eval/cot_em": cor_cot / total,
+                    "eval/scheduled_stage": scheduled_stage,
+                }
+            )
 
         if configs.only_eval:
             break

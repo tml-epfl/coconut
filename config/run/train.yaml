@@ -8,6 +8,9 @@ save_only_improve: false
 load_model_path: null
 only_eval: false
 eval_with_visible_steps: false
+cot_patterns:
+  - 'Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
+  - '(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
 wandb_entity: tml-coconut
 resume_mode: auto
 resume_attempt_id: null
