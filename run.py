@@ -49,6 +49,8 @@ from utils import (
 
 MANIFEST_FILENAME = "run_manifest.yaml"
 CONFIG_SNAPSHOT_FILENAME = "config.yaml"
+PATTERN = r"Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)"
+
 
 
 class GraphIdxBatchSampler(BatchSampler):
