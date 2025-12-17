@@ -224,16 +224,59 @@ def get_question_latent_dataset(
                 configs.max_latent_stage, len(sample["steps_tokenized"])
             )
 
-        k = min(max_latent_stage, scheduled_stage)
+        # Check if we should include remaining (non-abstracted) steps during eval
+        eval_with_visible_steps = getattr(configs, "eval_with_visible_steps", False)
 
-        k *= configs.c_thought
+        if eval_with_visible_steps:
+            # Number of steps being abstracted is determined by scheduled_stage
+            n_abstracted_steps = min(scheduled_stage, len(sample["steps_tokenized"]))
+            # Number of latent tokens is based on abstracted steps, capped by max_latent_stage
+            n_latent_tokens = (
+                min(max_latent_stage, n_abstracted_steps) * configs.c_thought
+            )
+            is_reversed = getattr(configs, "reversed", False)
 
-        tokens = (
-            sample["question_tokenized"]
-            + ([] if no_special_marker else [start_id])
-            + [latent_id] * k
-            + ([] if no_special_marker else [end_id])
-        )
+            if is_reversed:
+                # In reversed mode, last n_abstracted_steps are abstracted
+                # So we include steps[:-n_abstracted_steps] before latent tokens
+                remaining_steps = list(
+                    itertools.chain.from_iterable(
+                        sample["steps_tokenized"][:-n_abstracted_steps]
+                        if n_abstracted_steps > 0
+                        else sample["steps_tokenized"]
+                    )
+                )
+                tokens = (
+                    sample["question_tokenized"]
+                    + remaining_steps
+                    + ([] if no_special_marker else [start_id])
+                    + [latent_id] * n_latent_tokens
+                    + ([] if no_special_marker else [end_id])
+                )
+            else:
+                # In normal mode, first n_abstracted_steps are abstracted
+                # So we include steps[n_abstracted_steps:] after latent tokens
+                remaining_steps = list(
+                    itertools.chain.from_iterable(
+                        sample["steps_tokenized"][n_abstracted_steps:]
+                    )
+                )
+                tokens = (
+                    sample["question_tokenized"]
+                    + ([] if no_special_marker else [start_id])
+                    + [latent_id] * n_latent_tokens
+                    + ([] if no_special_marker else [end_id])
+                    + remaining_steps
+                )
+        else:
+            # Original logic: n_latent_tokens based on scheduled_stage capped by max_latent_stage
+            n_latent_tokens = min(max_latent_stage, scheduled_stage) * configs.c_thought
+            tokens = (
+                sample["question_tokenized"]
+                + ([] if no_special_marker else [start_id])
+                + [latent_id] * n_latent_tokens
+                + ([] if no_special_marker else [end_id])
+            )
 
         return {
             "input_ids": tokens,

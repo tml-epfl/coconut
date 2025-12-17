@@ -7,6 +7,7 @@ resume: 0
 save_only_improve: false
 load_model_path: null
 only_eval: false
+eval_with_visible_steps: false
 wandb_entity: tml-coconut
 resume_mode: auto
 resume_attempt_id: null

@@ -962,6 +962,7 @@ def main(cfg: DictConfig):
                         "train/step": epoch * len(train_dataloader) + step,
                         "train/loss": loss.detach().float()
                         * configs.gradient_accumulation_steps,
+                        "train/scheduled_stage": scheduled_stage,
                     }
                     wandb_run.log(log_dict)
 
@@ -1012,6 +1013,7 @@ def main(cfg: DictConfig):
                 if wandb_run and rank == 0:
                     log_dict = {
                         "eval/loss": total_loss / len(valid_loss_dataloader),
+                        "eval/scheduled_stage": scheduled_stage,
                     }
                     wandb_run.log(log_dict)
                     print("eval loss", total_loss / len(valid_loss_dataloader))
@@ -1101,7 +1103,36 @@ def main(cfg: DictConfig):
                 ]
 
                 cor += answer_output == answer
-                cor_cot += solution in paths
+
+                # Check CoT correctness
+                eval_with_visible_steps = getattr(configs, 'eval_with_visible_steps', False)
+                if eval_with_visible_steps:
+                    # Only validate the visible (non-abstracted) steps
+                    is_reversed = getattr(configs, 'reversed', False)
+                    total_steps = len(answer_cot.split("\n"))
+                    n_abstracted_steps = min(scheduled_stage, total_steps)
+                    n_visible_steps = total_steps - n_abstracted_steps
+
+                    if n_visible_steps > 0:
+                        if is_reversed:
+                            # Visible steps are the first n_visible_steps
+                            visible_solution = solution[:n_visible_steps]
+                            cor_cot += any(
+                                path[:n_visible_steps] == visible_solution
+                                for path in paths
+                            )
+                        else:
+                            # Visible steps are the last n_visible_steps
+                            visible_solution = solution[-n_visible_steps:]
+                            cor_cot += any(
+                                path[-n_visible_steps:] == visible_solution
+                                for path in paths
+                            )
+                    else:
+                        # All steps are abstracted, just check the answer
+                        cor_cot += 1
+                else:
+                    cor_cot += solution in paths
 
                 pbar.update(1)
                 pbar.set_description(
@@ -1124,7 +1155,11 @@ def main(cfg: DictConfig):
         sys.stdout.flush()
 
         if wandb_run:
-            wandb_run.log({"eval/acc": cor / total, "eval/cot_em": cor_cot / total})
+            wandb_run.log({
+                "eval/acc": cor / total,
+                "eval/cot_em": cor_cot / total,
+                "eval/scheduled_stage": scheduled_stage,
+            })
 
         if configs.only_eval:
             break
