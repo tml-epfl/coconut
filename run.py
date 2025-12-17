@@ -9,7 +9,8 @@ import itertools
 import json
 import os
 import sys
-from copy import copy, deepcopy
+import re
+from copy import copy
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -30,6 +31,7 @@ from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from tqdm import tqdm
 
+from preprocessing.prosqa import DAG
 from coconut import Coconut
 from dataset import (
     MyCollator,
@@ -47,6 +49,8 @@ from utils import (
 
 MANIFEST_FILENAME = "run_manifest.yaml"
 CONFIG_SNAPSHOT_FILENAME = "config.yaml"
+PATTERN = r"Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)"
+
 
 class GraphIdxBatchSampler(BatchSampler):
     """
@@ -70,7 +74,7 @@ class GraphIdxBatchSampler(BatchSampler):
         drop_last: bool = False,
     ):
         # 1. Store fixed parameters and pre-calculate the graph groupings (fixed setup)
-        
+
         # Group indices by graph_idx (this is fixed for the dataset)
         graph_groups: Dict[Any, List[int]] = {}
         idx_to_graph: Dict[int, Any] = {}
@@ -85,14 +89,14 @@ class GraphIdxBatchSampler(BatchSampler):
         self.dataset = dataset
         self.batch_size = batch_size
         self.drop_last = drop_last
-        
+
         # Set the sampler. If None, use RandomSampler by default to ensure epoch-wise shuffling.
         if sampler is None:
             # Important: Set generator for reproducibility if needed
             self.sampler = RandomSampler(dataset)
         else:
             self.sampler = sampler
-        
+
         # Store the fixed groupings for use in __iter__
         self.graph_groups = graph_groups
         self.idx_to_graph = idx_to_graph
@@ -106,8 +110,8 @@ class GraphIdxBatchSampler(BatchSampler):
         seen_graph_idx = set()
         for idx in sampled_indices:
             # Fallback to idx if graph_idx is missing
-            graph_idx = self.idx_to_graph.get(idx, idx) 
-            
+            graph_idx = self.idx_to_graph.get(idx, idx)
+
             # Ensure we only pick up graphs that are part of the sampled set
             if graph_idx in self.graph_groups and graph_idx not in seen_graph_idx:
                 graph_indices_order.append(graph_idx)
@@ -120,7 +124,7 @@ class GraphIdxBatchSampler(BatchSampler):
         for graph_idx in graph_indices_order:
             # Get ALL indices for this graph, not just the sampled ones
             graph_indices_list = self.graph_groups[graph_idx]
-            
+
             # Process the indices for this graph group (split if too large)
             i = 0
             while i < len(graph_indices_list):
@@ -152,9 +156,9 @@ class GraphIdxBatchSampler(BatchSampler):
             # We will keep the previous version for simplicity, but note the caveat:
             # If the batch list is not pre-calculated in __init__, this will be wrong.
             # For typical training loops, simply removing this method is usually safe.
-            
+
             # For this example, we return 0 to avoid incorrect length.
-            return 0 # Or calculate it by running the full logic, which is slow.
+            return 0  # Or calculate it by running the full logic, which is slow.
 
 
 def _now_iso() -> str:
@@ -937,7 +941,7 @@ def main(cfg: DictConfig):
                 batch = {
                     key: batch[key].to(rank)
                     for key in batch.keys()
-                    if key not in ("idx", "graph_idx")
+                    if key not in ("idx", "graph_idx", "graph")
                 }
 
                 outputs = parallel_model(**batch)
@@ -997,7 +1001,7 @@ def main(cfg: DictConfig):
                     batch = {
                         key: batch[key].to(rank)
                         for key in batch.keys()
-                        if key not in ("idx", "graph_idx")
+                        if key not in ("idx", "graph_idx", "graph")
                     }
 
                     outputs = parallel_model(**batch)
@@ -1029,10 +1033,11 @@ def main(cfg: DictConfig):
             for idx, batch in enumerate(valid_gen_dataloader):
                 test_idx = batch["idx"][0]
 
+                graph_data = batch["graph"][0]
                 batch = {
                     k: v.to(rank)
                     for k, v in batch.items()
-                    if v != None and k not in ["idx", "position_ids"]
+                    if v != None and k not in ["idx", "graph", "position_ids"]
                 }
                 # https://github.com/huggingface/transformers/issues/32492
 
@@ -1064,8 +1069,39 @@ def main(cfg: DictConfig):
                     print(f"Full output: '{tokenizer.decode(outputs[0])}'")
                     print(f"Extracted Output: '{answer_output}'")
 
+                # compute the correctness of cots
+                symbol_to_idx = {
+                    symbol: idx
+                    for idx, symbol in enumerate(graph_data["idx_to_symbol"])
+                }
+                nodes = list(range(len(graph_data["idx_to_symbol"])))
+                edges = [
+                    [edge[-1] for edge in graph_data["edges"] if edge[0] == node]
+                    for node in nodes
+                ]
+                graph = DAG(nodes, [-1 for _ in nodes], edges)
+                paths = graph.get_paths_between(
+                    graph_data["root"], graph_data["target"]
+                )
+                matches = [
+                    re.search(PATTERN, step.strip()) for step in cot_output.split("\n")
+                ]
+                solution = [
+                    (
+                        symbol_to_idx[match.group("x")]
+                        if match.group("x") in symbol_to_idx
+                        else -1,
+                        symbol_to_idx[match.group("y")]
+                        if match.group("y") in symbol_to_idx
+                        else -1,
+                    )
+                    if match
+                    else (-1, -1)
+                    for match in matches
+                ]
+
                 cor += answer_output == answer
-                cor_cot += cot_output == answer_cot
+                cor_cot += solution in paths
 
                 pbar.update(1)
                 pbar.set_description(

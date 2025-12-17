@@ -1,0 +1,1 @@
+torchrun --nnodes 1 --nproc_per_node 1 run.py model=gpt2_scratch_small model.model_config_overrides.n_layer=1 data=synthetic method=coconut run=synthetic_coconut run.wandb_entity=test

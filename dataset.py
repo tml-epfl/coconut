@@ -43,6 +43,13 @@ def get_dataset(path, tokenizer, max_size=1000000000):
             "graph_idx": sample["graph_idx"]
             if "graph_idx" in sample
             else sample["idx"],
+            "graph": {
+                "idx_to_symbol": sample["idx_to_symbol"],
+                "edges": sample["edges"],
+                "root": sample["root"],
+                "target": sample["target"],
+                "neg_target": sample["neg_target"],
+            },
         }
 
         return sample
@@ -138,6 +145,9 @@ class MyCollator:
 
         label_name = "label" if "label" in features[0].keys() else "labels"
 
+        # Extract graphs before processing
+        graphs = [feature.pop("graph", None) for feature in features]
+
         non_label_position_features = [
             {
                 k: v
@@ -190,6 +200,10 @@ class MyCollator:
                 batch["position_ids"], dtype=torch.int64
             )
 
+        # Add graphs back as a list (not tensorized)
+        if graphs[0] is not None:
+            batch["graph"] = graphs
+
         return batch
 
 
@@ -226,6 +240,7 @@ def get_question_latent_dataset(
             "idx": sample["idx"],
             "attention_mask": [1] * len(tokens),
             "position_ids": list(range(len(tokens))),
+            "graph": sample["graph"],
         }
 
     return base_dataset_valid.map(
@@ -316,6 +331,7 @@ def get_cot_latent_dataset(
             "idx": sample["idx"],
             "graph_idx": sample["graph_idx"],
             "position_ids": list(range(len(tokens))),
+            "graph": sample["graph"],
         }
 
     if torch.cuda.device_count() > 1:
