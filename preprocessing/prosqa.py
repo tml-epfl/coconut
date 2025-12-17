@@ -132,12 +132,17 @@ class DAG:
     def generate_prosqa_dag(
         num_nodes: int,
         poisson_coeff: float = 1.5,
-        prob_coeff: float = 0.3,
+        prob_coeff: float = 0.35,
         depth_coeff: float = 1.5,
     ):
         """
         Generates a Directed Acyclic Graph (DAG) with a layered structure
         based on ProsQA pseudo code.
+
+        Returns:
+            Tuple[DAG, Dict[int, int]]: The DAG and a dictionary mapping node index
+                to its family label (1 = descendant of node 0, 2 = descendant of node 1,
+                3 = both, 0 = neither).
         """
         assert prob_coeff < 0.5, "`prob_coeff` needs to be smaller than 0.5"
 
@@ -157,22 +162,24 @@ class DAG:
             else:
                 candidates = nodes
 
+            # ensure we have candidates; if empty (e.g., early iterations), fall back to existing nodes
+            if len(candidates) == 0:
+                candidates = nodes
+
             num_parents = min(len(candidates), num_parents)
             weights = np.asarray([depth[c] * depth_coeff + 1 for c in candidates])
             parents = np.random.choice(
-                candidates, num_parents, p=weights / np.sum(weights)
+                candidates,
+                num_parents,
+                p=weights / np.sum(weights),
+                replace=False,  # distinct parents, as in pseudo code
             )
 
             # compute the label
             _labels = [labels[parent] for parent in parents]
-            if 1 in _labels and 2 in _labels:
-                _label = 3
-            elif 1 in _labels:
-                _label = 1
-            elif 2 in labels:
-                _label = 2
-            else:
-                _label = 0
+            _label = 0
+            for _l in _labels:
+                _label |= _l  # bitwise OR of parent labels
 
             # compute the depth
             _depths = [depth[parent] for parent in parents]
@@ -188,11 +195,13 @@ class DAG:
             labels[i] = _label
             groups[_label].append(i)
 
-        return DAG(
+        dag = DAG(
             list(edges.keys()),
             [depth[i] for i in range(num_nodes)],
             list(edges.values()),
         )
+        # Return both the DAG and the node family labels
+        return dag, labels
 
     def __init__(
         self,
@@ -244,6 +253,7 @@ class DAG:
 def generate_query_from_dag(
     dag: DAG,
     entities: Optional[List[str]] = None,
+    node_labels: Optional[dict] = None,
     info_format: str = "{#1} is a {#2}.",
     question_format: str = "Is {#1} a {#2} or a {#3}?",
     answer_format: str = "{#1} is a {#2}.",
@@ -253,6 +263,27 @@ def generate_query_from_dag(
     num_chains: int = -1,
     verbose: bool = False,
 ) -> str:
+    """
+    Generate a query from a DAG following the ProsQA paper specification.
+
+    Args:
+        dag: The directed acyclic graph.
+        entities: List of entity/concept names for each node.
+        node_labels: Dictionary mapping node index to family label
+            (1 = family of node 0, 2 = family of node 1, 3 = both, 0 = neither).
+            Required for ProsQA-style generation to select concepts correctly.
+        info_format: Format string for context statements.
+        question_format: Format string for the question.
+        answer_format: Format string for the answer.
+        prefix_non_roots: Prefix for non-root nodes in statements.
+        length: Target path length for concept A (-1 for max depth).
+        neg_length: Target path length for concept B (-1 for max depth).
+        num_chains: Number of reasoning chains to generate (-1 for all).
+        verbose: Whether to print debug information.
+
+    Returns:
+        Tuple of (nodes, context, question, chains, answer) or None if generation fails.
+    """
     assert (
         num_chains == -1 or num_chains > 0
     ), "`num_chains` needs to be either -1 (all) or some positive integer"
@@ -269,12 +300,43 @@ def generate_query_from_dag(
     if neg_length == -1:
         neg_length = max(dag.layers)
 
-    pairs = [
-        (a, b, c)
-        for a in dag.layer_map[0]
-        for b in dag.layer_map[length]
-        for c in dag.layer_map[neg_length]
-    ]
+    # Identify leaf nodes (nodes with no children)
+    leaf_nodes = [n for n in dag.nodes if len(dag.edges[n]) == 0]
+
+    # Per paper: entity is node 0, concept A is a leaf with label 1, concept B is a leaf with label 2
+    if node_labels is not None:
+        # ProsQA-style: use labels to select concepts
+        # Entity is always node 0
+        a = 0
+
+        # Concept A candidates: leaf nodes with label 1 (family of node 0 only)
+        concept_a_candidates = [
+            n for n in leaf_nodes if node_labels.get(n) == 1
+        ]
+        # Concept B candidates: leaf nodes with label 2 (family of node 1 only)
+        concept_b_candidates = [
+            n for n in leaf_nodes if node_labels.get(n) == 2
+        ]
+
+        if not concept_a_candidates or not concept_b_candidates:
+            if verbose:
+                print("No valid concept candidates found with required labels")
+            return None
+
+        # Build pairs from valid candidates
+        pairs = [
+            (a, b, c)
+            for b in concept_a_candidates
+            for c in concept_b_candidates
+        ]
+    else:
+        # Fallback: original behavior based on layer depth
+        pairs = [
+            (a, b, c)
+            for a in dag.layer_map[0]
+            for b in dag.layer_map[length]
+            for c in dag.layer_map[neg_length]
+        ]
     random.shuffle(pairs)
 
     for a, b, c in pairs:
@@ -307,11 +369,21 @@ def generate_query_from_dag(
             random.shuffle(context)
             context = " ".join(context)
 
-            question = (
-                question_format.replace("{#1}", entities[a])
-                .replace("{#2}", entities[b])
-                .replace("{#3}", entities[c])
-            )
+            # Per paper: randomly permute concept A and B to avoid positional bias
+            if random.random() < 0.5:
+                # Swap positions: concept B first, then concept A
+                question = (
+                    question_format.replace("{#1}", entities[a])
+                    .replace("{#2}", entities[c])
+                    .replace("{#3}", entities[b])
+                )
+            else:
+                # Original order: concept A first, then concept B
+                question = (
+                    question_format.replace("{#1}", entities[a])
+                    .replace("{#2}", entities[b])
+                    .replace("{#3}", entities[c])
+                )
 
             chains = [[] for _ in paths]
             for idx, path in enumerate(paths):
@@ -325,6 +397,7 @@ def generate_query_from_dag(
                         )
                     )
 
+            # Answer always refers to the correct concept (b)
             answer = answer_format.replace("{#1}", entities[a]).replace(
                 "{#2}", entities[b]
             )

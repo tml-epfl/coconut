@@ -403,6 +403,10 @@ def generate_dataset(
 
             for _ in range(max_trials):
                 try:
+                    # node_labels tracks family membership (1=family of node 0, 2=family of node 1, etc.)
+                    # Only used for prosqa method
+                    family_labels = None
+
                     if method == "tml":
                         dag = DAG.generate_layered_dag(
                             num_nodes=n_nodes,
@@ -416,7 +420,7 @@ def generate_dataset(
                             max(dag.layers) + 1 == n_layers
                         ), f"Number of layers {max(dag.layers) + 1} is not equal to the given quantity {n_layers}"
                     elif method == "prosqa":
-                        dag = DAG.generate_prosqa_dag(
+                        dag, family_labels = DAG.generate_prosqa_dag(
                             num_nodes=n_nodes,
                         )
                         assert (
@@ -436,10 +440,12 @@ def generate_dataset(
                         else neg_length
                     )
 
-                    labels = sample_names_for_dag(dag, names, entities)
+                    # entity_names are the string names for each node
+                    entity_names = sample_names_for_dag(dag, names, entities)
                     nodes, context, question, chains, answer = generate_query_from_dag(
                         dag,
-                        labels,
+                        entity_names,
+                        node_labels=family_labels,
                         length=_length,
                         neg_length=_neg_length,
                         num_chains=num_chains,
@@ -455,7 +461,7 @@ def generate_dataset(
                             "root": nodes[0],
                             "target": nodes[1],
                             "neg_target": nodes[2],
-                            "idx_to_symbol": labels,
+                            "idx_to_symbol": entity_names,
                             "question": context + " " + question,
                             "steps": chain,
                             "answer": answer,
