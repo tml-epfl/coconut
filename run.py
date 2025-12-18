@@ -823,7 +823,7 @@ def main(cfg: DictConfig):
             dataset_gen_val,
             num_workers=1,
             pin_memory=True,
-            batch_size=1,
+            batch_size=configs.batch_size_training,
             collate_fn=collator,
             sampler=DistributedSampler(dataset_gen_val, shuffle=False),
         )
@@ -1033,154 +1033,180 @@ def main(cfg: DictConfig):
 
         with torch.no_grad():
             parallel_model.module.eval()
-            for idx, batch in enumerate(valid_gen_dataloader):
-                test_idx = batch["idx"][0]
+            example_counter = 0
+            for batch_idx, batch in enumerate(valid_gen_dataloader):
+                # Keep indices and graphs on CPU; move only tensor inputs to device
+                batch_idx_tensor = batch["idx"]
+                batch_graphs = batch["graph"]
 
-                graph_data = batch["graph"][0]
-                batch = {
+                model_batch = {
                     k: v.to(rank)
                     for k, v in batch.items()
-                    if v != None and k not in ["idx", "graph", "position_ids"]
+                    if v is not None and k not in ["idx", "graph", "position_ids"]
                 }
                 # https://github.com/huggingface/transformers/issues/32492
 
-                assert len(batch["input_ids"]) == 1
-                answer = answers_val[test_idx.cpu().item()]
-                answer_cot = cot_val[test_idx.cpu().item()]
-                question = question_val[test_idx.cpu().item()]
-
-                total += 1
+                if isinstance(model_batch["input_ids"], torch.Tensor):
+                    batch_size = model_batch["input_ids"].shape[0]
+                else:
+                    batch_size = len(model_batch["input_ids"])
 
                 # synced_gpus=True in FSDP mode, as we need to keep # forward pass the same on each device
                 outputs = parallel_model.module.generate(
-                    **batch,
+                    **model_batch,
                     max_new_tokens=max_new_tokens,
                     synced_gpus=not configs.only_eval,
                 )
 
-                text_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                answer_output = text_output.split("#")[-1].replace(",", "").strip()
-                cot_output = (
-                    ("\n".join(text_output.split("\n")[1:])).split("#")[0].strip()
-                )
-                cor += answer_output == answer
+                # HF generate may return a tensor or an object with .sequences
+                if isinstance(outputs, torch.Tensor):
+                    gen_seqs = outputs
+                elif hasattr(outputs, "sequences"):
+                    gen_seqs = outputs.sequences
+                else:
+                    gen_seqs = outputs[0]
 
-                if idx < 5 and rank == 0:
-                    # print some examples
-                    print(
-                        f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
+                total += batch_size
+                pbar.update(batch_size)
+
+                for i in range(batch_size):
+                    # Retrieve original sample index
+                    if isinstance(batch_idx_tensor, torch.Tensor):
+                        test_idx = batch_idx_tensor[i].item()
+                    else:
+                        test_idx = batch_idx_tensor[i]
+
+                    answer = answers_val[test_idx]
+                    answer_cot = cot_val[test_idx]
+                    question = question_val[test_idx]
+
+                    text_output = tokenizer.decode(
+                        gen_seqs[i], skip_special_tokens=True
                     )
-                    print(f"Full output: '{tokenizer.decode(outputs[0])}'")
-                    print(f"Extracted Output: '{answer_output}'")
+                    answer_output = (
+                        text_output.split("#")[-1].replace(",", "").strip()
+                    )
+                    cot_output = (
+                        ("\n".join(text_output.split("\n")[1:])).split("#")[0].strip()
+                    )
+                    cor += answer_output == answer
 
-                # === compute the correctness of cots ===
+                    if example_counter < 5 and rank == 0:
+                        # print some examples
+                        print(
+                            f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
+                        )
+                        print(f"Full output: '{tokenizer.decode(gen_seqs[i])}'")
+                        print(f"Extracted Output: '{answer_output}'")
+                    example_counter += 1
 
-                # extract the related graph data
-                symbol_to_idx = {
-                    symbol: idx
-                    for idx, symbol in enumerate(graph_data["idx_to_symbol"])
-                }
-                nodes = list(range(len(graph_data["idx_to_symbol"])))
-                edges = [
-                    [edge[-1] for edge in graph_data["edges"] if edge[0] == node]
-                    for node in nodes
-                ]
-                graph = DAG(nodes, [-1 for _ in nodes], edges)
-                paths = graph.get_paths_between(
-                    graph_data["root"], graph_data["target"]
-                )
-                paths = [
-                    [(path[i - 1], path[i]) for i in range(1, len(path))]
-                    for path in paths
-                ]
+                    # === compute the correctness of cots ===
 
-                # process the cot outputs to the graph nodes
-                matches = [step.strip() for step in cot_output.split("\n")]
-                for pattern in configs.cot_patterns:
-                    matches = [
-                        (re.search(pattern, match) or match)
+                    # extract the related graph data
+                    graph_data = batch_graphs[i]
+                    symbol_to_idx = {
+                        symbol: j
+                        for j, symbol in enumerate(graph_data["idx_to_symbol"])
+                    }
+                    nodes = list(range(len(graph_data["idx_to_symbol"])))
+                    edges = [
+                        [edge[-1] for edge in graph_data["edges"] if edge[0] == node]
+                        for node in nodes
+                    ]
+                    graph = DAG(nodes, [-1 for _ in nodes], edges)
+                    paths = graph.get_paths_between(
+                        graph_data["root"], graph_data["target"]
+                    )
+                    paths = [
+                        [(path[k - 1], path[k]) for k in range(1, len(path))]
+                        for path in paths
+                    ]
+
+                    # process the cot outputs to the graph nodes
+                    matches = [step.strip() for step in cot_output.split("\n")]
+                    for pattern in configs.cot_patterns:
+                        matches = [
+                            (re.search(pattern, match) or match)
+                            if isinstance(match, str)
+                            else match
+                            for match in matches
+                        ]
+                    matches_x = [
+                        -1
                         if isinstance(match, str)
-                        else match
+                        or not (match.group("x") in symbol_to_idx)
+                        else symbol_to_idx[match.group("x")]
                         for match in matches
                     ]
-                matches_x = [
-                    -1
-                    if isinstance(match, str) or not (match.group("x") in symbol_to_idx)
-                    else symbol_to_idx[match.group("x")]
-                    for match in matches
-                ]
-                matches_y = [
-                    -1
-                    if isinstance(match, str) or not (match.group("y") in symbol_to_idx)
-                    else symbol_to_idx[match.group("y")]
-                    for match in matches
-                ]
-                solution = [
-                    (match_x, match_y)
-                    for (match_x, match_y) in zip(matches_x, matches_y)
-                ]
+                    matches_y = [
+                        -1
+                        if isinstance(match, str)
+                        or not (match.group("y") in symbol_to_idx)
+                        else symbol_to_idx[match.group("y")]
+                        for match in matches
+                    ]
+                    solution = [
+                        (match_x, match_y)
+                        for (match_x, match_y) in zip(matches_x, matches_y)
+                    ]
 
-                # check cot correctness
-                eval_with_visible_steps = getattr(
-                    configs, "eval_with_visible_steps", False
-                )
-                if eval_with_visible_steps:
-                    # only validate visible steps
-                    is_reversed = getattr(configs, "reversed", False)
-                    total_steps = len(answer_cot.split("\n"))
-                    n_abstracted_steps = min(scheduled_stage, total_steps)
-                    n_visible_steps = total_steps - n_abstracted_steps
+                    # check cot correctness
+                    eval_with_visible_steps = getattr(
+                        configs, "eval_with_visible_steps", False
+                    )
+                    if eval_with_visible_steps:
+                        # only validate visible steps
+                        is_reversed = getattr(configs, "reversed", False)
+                        total_steps = len(answer_cot.split("\n"))
+                        n_abstracted_steps = min(scheduled_stage, total_steps)
+                        n_visible_steps = total_steps - n_abstracted_steps
 
-                    if n_visible_steps > 0:
-                        if is_reversed:
-                            # visible steps are the first n_visible_steps
-                            visible_solution = solution[:n_visible_steps]
-                            cor_cot += any(
-                                path[:n_visible_steps] == visible_solution
-                                for path in paths
-                            )
-
-                            # print some examples
-                            if idx < 5 and rank == 0:
-                                print(f"Symbol to idx map: {symbol_to_idx}")
-                                print(f"Visible solution: '{visible_solution}'")
-                                print(
-                                    f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'"
+                        if n_visible_steps > 0:
+                            if is_reversed:
+                                # visible steps are the first n_visible_steps
+                                visible_solution = solution[:n_visible_steps]
+                                cor_cot += any(
+                                    path[:n_visible_steps] == visible_solution
+                                    for path in paths
                                 )
+
+                                # print some examples
+                                if example_counter <= 5 and rank == 0:
+                                    print(f"Symbol to idx map: {symbol_to_idx}")
+                                    print(f"Visible solution: '{visible_solution}'")
+                                    print(
+                                        f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'"
+                                    )
+                            else:
+                                # Visible steps are the last n_visible_steps
+                                visible_solution = solution[-n_visible_steps:]
+                                cor_cot += any(
+                                    path[-n_visible_steps:] == visible_solution
+                                    for path in paths
+                                )
+
+                                # print some examples
+                                if example_counter <= 5 and rank == 0:
+                                    print(f"Symbol to idx map: {symbol_to_idx}")
+                                    print(f"Visible solution: '{visible_solution}'")
+                                    print(
+                                        f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'"
+                                    )
                         else:
-                            # Visible steps are the last n_visible_steps
-                            visible_solution = solution[-n_visible_steps:]
-                            cor_cot += any(
-                                path[-n_visible_steps:] == visible_solution
-                                for path in paths
-                            )
-
-                            # print some examples
-                            if idx < 5 and rank == 0:
-                                print(f"Symbol to idx map: {symbol_to_idx}")
-                                print(f"Visible solution: '{visible_solution}'")
-                                print(
-                                    f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'"
-                                )
+                            # All steps are abstracted, just check the answer
+                            cor_cot += 1
                     else:
-                        # All steps are abstracted, just check the answer
-                        cor_cot += 1
-                else:
-                    cor_cot += solution in paths
+                        cor_cot += solution in paths
 
-                    # print some examples
-                    if idx < 5 and rank == 0:
-                        print(f"Symbol to idx map: {symbol_to_idx}")
-                        print(f"Visible solution: '{solution}'")
-                        print(f"Correct traces: '{paths}'")
+                        # print some examples
+                        if example_counter <= 5 and rank == 0:
+                            print(f"Symbol to idx map: {symbol_to_idx}")
+                            print(f"Visible solution: '{solution}'")
+                            print(f"Correct traces: '{paths}'")
 
-                pbar.update(1)
                 pbar.set_description(
                     f"Test accuracy: {round(float(cor.detach().float() / total.detach().float()), 2)}"
                 )
-
-            pbar.close()
-            print(f"Device {rank}: Cor={cor}, CoT={cor_cot}, Total={total}")
 
         dist.all_reduce(cor_cot, op=dist.ReduceOp.SUM)
         dist.all_reduce(cor, op=dist.ReduceOp.SUM)
