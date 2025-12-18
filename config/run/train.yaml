@@ -15,9 +15,10 @@ eval_temperature: 0.7
 eval_top_p: 0.9
 eval_num_beams: 4
 cot_patterns:
-  - '\<\|start-latent\|\>\<\|end-latent\|\>\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
-  - '(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
+  - '\<\|start-latent\|\>(.*?)\<\|end-latent\|\>Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
+  - '\<\|start-latent\|\>(.*?)\<\|end-latent\|\>(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
   - 'Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
+  - '(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
 wandb_entity: tml-coconut
 resume_mode: auto
 resume_attempt_id: null
