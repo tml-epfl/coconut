@@ -423,7 +423,7 @@ def generate_dataset(
     num_edges: Tuple[int, int],
     names: str,
     entities: str,
-    dist: str = "gauss", # or "unif"
+    dist: str = "gauss",  # or "unif"
     length: int = -1,
     min_length: int = 1,
     neg_length: int = -1,
@@ -539,9 +539,7 @@ def _generate_samples_for_graph(args):
 
                 max_length = max(dag.layers)
                 _length = (
-                    random.randint(min_length, max_length)
-                    if length == 0
-                    else length
+                    random.randint(min_length, max_length) if length == 0 else length
                 )
                 _neg_length = (
                     random.randint(min_neg_length, max_length)

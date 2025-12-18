@@ -8,6 +8,7 @@ save_only_improve: false
 load_model_path: null
 only_eval: false
 eval_with_visible_steps: false
+eval_best_of: 1
 cot_patterns:
   - 'Every\s+(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
   - '(?P<x>.+?)\s+is\s+a\s+(?P<y>.+)\.'
