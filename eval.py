@@ -82,6 +82,7 @@ def evaluate_generation(
                     **model_batch,
                     max_new_tokens=max_new_tokens,
                     synced_gpus=not configs.only_eval,
+                    pad_token_id=tokenizer.eos_token_id
                 )
 
                 if decoding_mode == "config" and eval_best_of > 1:
@@ -258,7 +259,12 @@ def evaluate_generation(
                                     ):
                                         cot_correct = True
 
-                                    if example_counter <= 5 and rank == 0:
+                                    if (
+                                        decoding_mode == "greedy"
+                                        and example_counter < 5
+                                        and rank == 0
+                                        and sample_id == 0
+                                    ):
                                         print(f"Symbol to idx map: {symbol_to_idx}")
                                         print(
                                             f"Visible solution: '{visible_solution}'"
@@ -275,7 +281,12 @@ def evaluate_generation(
                                     ):
                                         cot_correct = True
 
-                                    if example_counter <= 5 and rank == 0:
+                                    if (
+                                        decoding_mode == "greedy"
+                                        and example_counter < 5
+                                        and rank == 0
+                                        and sample_id == 0
+                                    ):
                                         print(f"Symbol to idx map: {symbol_to_idx}")
                                         print(
                                             f"Visible solution: '{visible_solution}'"
@@ -291,7 +302,12 @@ def evaluate_generation(
                                 cot_correct = True
 
                             # print some examples
-                            if example_counter <= 5 and rank == 0:
+                            if (
+                                decoding_mode == "greedy"
+                                and example_counter < 5
+                                and rank == 0
+                                and sample_id == 0
+                            ):                                
                                 print(f"Symbol to idx map: {symbol_to_idx}")
                                 print(f"Visible solution: '{solution}'")
                                 print(f"Correct traces: '{paths}'")
