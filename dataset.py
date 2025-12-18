@@ -284,13 +284,7 @@ def get_question_latent_dataset(
             "idx": sample["idx"],
             "attention_mask": [1] * len(tokens),
             "position_ids": list(range(len(tokens))),
-            "graph": {
-                "idx_to_symbol": sample["idx_to_symbol"],
-                "edges": sample["edges"],
-                "root": sample["root"],
-                "target": sample["target"],
-                "neg_target": sample["neg_target"],
-            },
+            "graph": sample["graph"],
         }
 
     return base_dataset_valid.map(
@@ -381,13 +375,7 @@ def get_cot_latent_dataset(
             "idx": sample["idx"],
             "graph_idx": sample["graph_idx"],
             "position_ids": list(range(len(tokens))),
-            "graph": {
-                "idx_to_symbol": sample["idx_to_symbol"],
-                "edges": sample["edges"],
-                "root": sample["root"],
-                "target": sample["target"],
-                "neg_target": sample["neg_target"],
-            },
+            "graph": sample["graph"],
         }
 
     if torch.cuda.device_count() > 1:
