@@ -5,3 +5,13 @@ no_cot: false
 reversed: false
 multi: false
 distillation: true
+
+# Teacher model path for distillation (should point to a checkpoint file)
+teacher_model_path: null  # Set this to the path of the teacher model checkpoint
+
+# Generation parameters for teacher model distillation
+distillation_sampling_strategy: "sample"  # "greedy", "beam", or "sample"
+distillation_temperature: 0.7
+distillation_top_p: 0.9
+distillation_num_beams: null  # Only used for "beam" strategy
+distillation_max_new_tokens: 128

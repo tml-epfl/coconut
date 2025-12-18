@@ -5,12 +5,10 @@ import atexit
 import datetime
 import functools
 import gc
-import itertools
 import json
 import os
-import sys
-import re
-from copy import copy
+
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -573,6 +571,7 @@ def main(cfg: DictConfig):
                 "model_config_overrides is only supported when model_init is 'scratch'."
             )
         model = AutoModelForCausalLM.from_pretrained(configs.model_id)
+
     tokenizer.add_tokens("<|start-latent|>")
     tokenizer.add_tokens("<|end-latent|>")
     tokenizer.add_tokens("<|latent|>")
@@ -611,6 +610,18 @@ def main(cfg: DictConfig):
             # resume or evaluate sft model
             loaded = True
             print(model.load_state_dict(saved_weights, strict=False))
+
+    # Create a copy of the base model for teacher (BEFORE tokens are added and embeddings are resized)
+    # This will be used later if distillation is enabled
+    # We copy before resize_token_embeddings so the copied model has the original vocab size (50257)
+    # which matches the checkpoint vocab size
+    base_model_copy = None
+    if (
+        getattr(configs, "distillation", False)
+        and getattr(configs, "teacher_model_path", None)
+        and has_load_path(getattr(configs, "teacher_model_path", None))
+    ):
+        base_model_copy = deepcopy(model)
 
     if not (configs.cot or configs.no_thoughts or configs.no_cot):
         # if we need new tokens, initialize their embeddings and lm heads
@@ -665,14 +676,86 @@ def main(cfg: DictConfig):
         print(parallel_model)
 
     if configs.data_type == "synthetic":
+        # Prepare teacher model if distillation is enabled
+        teacher = None
+        distillation_config = {}
+        if getattr(configs, "distillation", False):
+            teacher_model_path = getattr(configs, "teacher_model_path", None)
 
-        def _generate_dataset(path, **configs):
+            # Inside the distillation block
+            if teacher_model_path and has_load_path(teacher_model_path):
+                if rank == 0:
+                    print(f"Loading teacher model from {teacher_model_path}")
+                
+            # Replace the deepcopy block with this:
+            if (
+                getattr(configs, "distillation", False)
+                and getattr(configs, "teacher_model_path", None)
+                and has_load_path(getattr(configs, "teacher_model_path", None))
+            ):
+                # Initialize a fresh shell (don't deepcopy)
+                teacher_config = AutoConfig.from_pretrained(configs.model_id)
+                # Ensure it matches the teacher's config (e.g., if it was trained from scratch)
+                if model_init == "scratch":
+                    for key, value in model_config_overrides.items():
+                        setattr(teacher_config, key, value)
+                
+                # Create model on CPU directly
+                teacher_model = AutoModelForCausalLM.from_config(teacher_config)
+                
+                # Load weights directly into the shell
+                state_dict = torch.load(configs.teacher_model_path, map_location="cpu")
+                
+                # Handle Coconut/Base model logic as before
+                if any(k.startswith("base_causallm") for k in state_dict.keys()):
+                    base_prefix = "base_causallm."
+                    state_dict = {k[len(base_prefix):]: v for k, v in state_dict.items() if k.startswith(base_prefix)}
+                
+                teacher_model.load_state_dict(state_dict)
+                del state_dict # Clean up RAM immediately
+                
+                teacher_model.eval()
+                for param in teacher_model.parameters():
+                    param.requires_grad = False
+                
+                # --- ADD THIS LINE HERE ---
+                teacher_model.share_memory()
+                teacher = (teacher_model, tokenizer)
+
+                # Prepare distillation config from method config
+                distillation_config = {
+                    "distillation_sampling_strategy": getattr(
+                        configs, "distillation_sampling_strategy", "sample"
+                    ),
+                    "distillation_temperature": getattr(
+                        configs, "distillation_temperature", 0.7
+                    ),
+                    "distillation_top_p": getattr(configs, "distillation_top_p", 0.9),
+                    "distillation_num_beams": getattr(
+                        configs, "distillation_num_beams", None
+                    ),
+                    "distillation_max_new_tokens": getattr(
+                        configs, "distillation_max_new_tokens", 128
+                    ),
+                }
+            else:
+                if rank == 0:
+                    print(
+                        "Warning: distillation enabled but no valid teacher_model_path provided. "
+                        "Skipping teacher generation."
+                    )
+
+        def _generate_dataset(path, **dataset_configs):
+            dataset_configs = dataset_configs.copy()
+            dataset_configs["teacher"] = teacher
+            dataset_configs["distillation_config"] = distillation_config
+
             if torch.cuda.device_count() > 1:
                 if dist.get_rank() == 0:
                     processed_dataset = [
                         generate_dataset(
                             path,
-                            **configs,
+                            **dataset_configs,
                             names="data/names.txt",
                             entities="data/entities.txt",
                         )
@@ -684,7 +767,7 @@ def main(cfg: DictConfig):
             else:
                 dataset = generate_dataset(
                     path,
-                    **configs,
+                    **dataset_configs,
                     names="data/names.txt",
                     entities="data/entities.txt",
                 )

@@ -310,13 +310,9 @@ def generate_query_from_dag(
         a = 0
 
         # Concept A candidates: leaf nodes with label 1 (family of node 0 only)
-        concept_a_candidates = [
-            n for n in leaf_nodes if node_labels.get(n) == 1
-        ]
+        concept_a_candidates = [n for n in leaf_nodes if node_labels.get(n) == 1]
         # Concept B candidates: leaf nodes with label 2 (family of node 1 only)
-        concept_b_candidates = [
-            n for n in leaf_nodes if node_labels.get(n) == 2
-        ]
+        concept_b_candidates = [n for n in leaf_nodes if node_labels.get(n) == 2]
 
         if not concept_a_candidates or not concept_b_candidates:
             if verbose:
@@ -324,11 +320,7 @@ def generate_query_from_dag(
             return None
 
         # Build pairs from valid candidates
-        pairs = [
-            (a, b, c)
-            for b in concept_a_candidates
-            for c in concept_b_candidates
-        ]
+        pairs = [(a, b, c) for b in concept_a_candidates for c in concept_b_candidates]
     else:
         # Fallback: original behavior based on layer depth
         pairs = [

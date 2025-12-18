@@ -1,12 +1,113 @@
 import re
 from copy import copy
-from typing import Tuple
+from typing import Tuple, Dict, Any, Optional
 
 import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
 from preprocessing.prosqa import DAG
+
+
+def generate_with_config(
+    model: Any,
+    input_ids: torch.Tensor,
+    tokenizer: Any,
+    max_new_tokens: int,
+    num_return_sequences: int = 1,
+    sampling_strategy: str = "sample",
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    num_beams: Optional[int] = None,
+    pad_token_id: Optional[int] = None,
+    synced_gpus: bool = False,
+    attention_mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Shared generation function that handles different sampling strategies.
+
+    Args:
+        model: The model to generate from (should have a .generate method)
+        input_ids: Input token IDs [batch_size, seq_len]
+        tokenizer: Tokenizer for pad_token_id (if pad_token_id is None)
+        max_new_tokens: Maximum number of tokens to generate
+        num_return_sequences: Number of sequences to generate per input
+        sampling_strategy: One of "greedy", "beam", "sample"
+        temperature: Sampling temperature (for "sample" strategy)
+        top_p: Nucleus sampling parameter (for "sample" strategy)
+        num_beams: Number of beams (for "beam" strategy)
+        pad_token_id: Padding token ID (defaults to tokenizer.eos_token_id)
+        synced_gpus: Whether to sync GPUs (for FSDP)
+        attention_mask: Attention mask (optional)
+
+    Returns:
+        Generated sequences [batch_size * num_return_sequences, seq_len] or [batch_size, seq_len] if num_return_sequences=1
+    """
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+
+    # Greedy decoding only supports single sequence
+    if sampling_strategy == "greedy":
+        assert (
+            num_return_sequences == 1
+        ), "Greedy decoding only supports num_return_sequences=1"
+
+    generate_kwargs: Dict[str, Any] = {
+        "input_ids": input_ids,
+        "max_new_tokens": max_new_tokens,
+        "pad_token_id": pad_token_id,
+        "synced_gpus": synced_gpus,
+    }
+
+    if attention_mask is not None:
+        generate_kwargs["attention_mask"] = attention_mask
+
+    if num_return_sequences > 1:
+        generate_kwargs["num_return_sequences"] = num_return_sequences
+
+        if sampling_strategy == "beam":
+            # Use beam search
+            if num_beams is None:
+                num_beams = num_return_sequences
+            num_beams = max(num_beams, num_return_sequences)
+            generate_kwargs["num_beams"] = num_beams
+            generate_kwargs["do_sample"] = False
+        else:
+            # Sampling-based (greedy already asserted to be num_return_sequences=1)
+            generate_kwargs["do_sample"] = True
+            generate_kwargs["temperature"] = (
+                temperature if temperature is not None else 0.7
+            )
+            if top_p is not None:
+                generate_kwargs["top_p"] = top_p
+    else:
+        # Single sequence
+        if sampling_strategy == "greedy":
+            # True greedy decoding
+            generate_kwargs["do_sample"] = False
+        elif sampling_strategy == "sample" and temperature is not None:
+            # Explicit sampling
+            generate_kwargs["do_sample"] = True
+            generate_kwargs["temperature"] = temperature
+            if top_p is not None:
+                generate_kwargs["top_p"] = top_p
+        else:
+            # Default to greedy for single sequence
+            generate_kwargs["do_sample"] = False
+
+    # Handle both regular models and wrapped models (like DDP/FSDP)
+    if hasattr(model, "module"):
+        outputs = model.module.generate(**generate_kwargs)
+    else:
+        outputs = model.generate(**generate_kwargs)
+
+    # Handle different return types
+    if isinstance(outputs, torch.Tensor):
+        return outputs
+    elif hasattr(outputs, "sequences"):
+        return outputs.sequences
+    else:
+        return outputs[0] if isinstance(outputs, (list, tuple)) else outputs
 
 
 def evaluate_generation(
@@ -49,9 +150,7 @@ def evaluate_generation(
             if decoding_mode == "greedy"
             else "Test Accuracy (best-of-N)"
         )
-        pbar = tqdm(
-            colour="blue", desc=desc, total=total_length, dynamic_ncols=True
-        )
+        pbar = tqdm(colour="blue", desc=desc, total=total_length, dynamic_ncols=True)
         cor, cor_cot, total = (
             torch.tensor(0, device=rank),
             torch.tensor(0, device=rank),
@@ -77,67 +176,38 @@ def evaluate_generation(
                 else:
                     batch_size = len(model_batch["input_ids"])
 
-                # synced_gpus=True in FSDP mode, as we need to keep # forward pass the same on each device
-                generate_kwargs = dict(
-                    **model_batch,
+                # Use shared generation function
+                sampling_strategy = getattr(configs, "eval_sampling_strategy", "sample")
+                if decoding_mode == "greedy":
+                    sampling_strategy = "greedy"
+
+                gen_seqs = generate_with_config(
+                    model=parallel_model,
+                    input_ids=model_batch["input_ids"],
+                    tokenizer=tokenizer,
                     max_new_tokens=max_new_tokens,
+                    num_return_sequences=eval_best_of
+                    if decoding_mode == "config" and eval_best_of > 1
+                    else 1,
+                    sampling_strategy=sampling_strategy,
+                    temperature=getattr(configs, "eval_temperature", 0.7)
+                    if decoding_mode == "config"
+                    else None,
+                    top_p=getattr(configs, "eval_top_p", 0.9)
+                    if decoding_mode == "config"
+                    else None,
+                    num_beams=getattr(configs, "eval_num_beams", eval_best_of)
+                    if sampling_strategy == "beam"
+                    else None,
+                    pad_token_id=tokenizer.eos_token_id,
                     synced_gpus=not configs.only_eval,
-                    pad_token_id=tokenizer.eos_token_id
+                    attention_mask=model_batch.get("attention_mask"),
                 )
-
-                if decoding_mode == "config" and eval_best_of > 1:
-                    # best-of-N decoding using configured strategy
-                    generate_kwargs["num_return_sequences"] = eval_best_of
-
-                    sampling_strategy = getattr(
-                        configs, "eval_sampling_strategy", "sample"
-                    )
-
-                    if sampling_strategy == "beam":
-                        # use beam search; ensure num_beams >= num_return_sequences
-                        num_beams = getattr(configs, "eval_num_beams", eval_best_of)
-                        num_beams = max(num_beams, eval_best_of)
-                        generate_kwargs["num_beams"] = num_beams
-                        generate_kwargs["do_sample"] = False
-                    elif sampling_strategy == "greedy":
-                        # approximate greedy best-of-N via sampling (since true greedy
-                        # does not support num_return_sequences > 1)
-                        generate_kwargs.setdefault("do_sample", True)
-                        generate_kwargs.setdefault(
-                            "temperature", getattr(configs, "eval_temperature", 0.7)
-                        )
-                        generate_kwargs.setdefault(
-                            "top_p", getattr(configs, "eval_top_p", 0.9)
-                        )
-                    else:
-                        # default: sampling-based best-of-N (recommended)
-                        generate_kwargs.setdefault("do_sample", True)
-                        generate_kwargs.setdefault(
-                            "temperature", getattr(configs, "eval_temperature", 0.7)
-                        )
-                        generate_kwargs.setdefault(
-                            "top_p", getattr(configs, "eval_top_p", 0.9)
-                        )
-                elif decoding_mode == "greedy":
-                    # explicit greedy: single sequence per example, no sampling
-                    generate_kwargs["do_sample"] = False
-                    generate_kwargs.pop("num_beams", None)
-                    # do NOT set num_return_sequences here; we want exactly 1
-
-                outputs = parallel_model.module.generate(**generate_kwargs)
-
-                # HF generate may return a tensor or an object with .sequences
-                if isinstance(outputs, torch.Tensor):
-                    gen_seqs = outputs
-                elif hasattr(outputs, "sequences"):
-                    gen_seqs = outputs.sequences
-                else:
-                    gen_seqs = outputs[0]
 
                 # Shape handling:
                 # - For best-of-1, we want shape [batch_size, 1, seq_len]
                 # - For best-of-N, HF returns [batch_size * N, seq_len]; reshape to [batch_size, N, seq_len]
-                if eval_best_of > 1:
+                if eval_best_of > 1 and decoding_mode == "config":
                     gen_seqs = gen_seqs.view(batch_size, eval_best_of, -1)
                 else:
                     gen_seqs = gen_seqs.unsqueeze(1)
@@ -163,7 +233,8 @@ def evaluate_generation(
                     # extract the related graph data (shared across samples)
                     graph_data = batch_graphs[i]
                     symbol_to_idx = {
-                        symbol: j for j, symbol in enumerate(graph_data["idx_to_symbol"])
+                        symbol: j
+                        for j, symbol in enumerate(graph_data["idx_to_symbol"])
                     }
                     nodes = list(range(len(graph_data["idx_to_symbol"])))
                     edges = [
@@ -189,9 +260,7 @@ def evaluate_generation(
 
                     for sample_id in range(eval_best_of):
                         seq = gen_seqs[i, sample_id]
-                        text_output = tokenizer.decode(
-                            seq, skip_special_tokens=True
-                        )
+                        text_output = tokenizer.decode(seq, skip_special_tokens=True)
                         answer_output = (
                             text_output.split("#")[-1].replace(",", "").strip()
                         )
@@ -266,9 +335,7 @@ def evaluate_generation(
                                         and sample_id == 0
                                     ):
                                         print(f"Symbol to idx map: {symbol_to_idx}")
-                                        print(
-                                            f"Visible solution: '{visible_solution}'"
-                                        )
+                                        print(f"Visible solution: '{visible_solution}'")
                                         print(
                                             f"Correct traces: '{[path[:n_visible_steps] for path in paths]}'"
                                         )
@@ -288,9 +355,7 @@ def evaluate_generation(
                                         and sample_id == 0
                                     ):
                                         print(f"Symbol to idx map: {symbol_to_idx}")
-                                        print(
-                                            f"Visible solution: '{visible_solution}'"
-                                        )
+                                        print(f"Visible solution: '{visible_solution}'")
                                         print(
                                             f"Correct traces: '{[path[-n_visible_steps:] for path in paths]}'"
                                         )
@@ -307,7 +372,7 @@ def evaluate_generation(
                                 and example_counter < 5
                                 and rank == 0
                                 and sample_id == 0
-                            ):                                
+                            ):
                                 print(f"Symbol to idx map: {symbol_to_idx}")
                                 print(f"Visible solution: '{solution}'")
                                 print(f"Correct traces: '{paths}'")
@@ -346,7 +411,9 @@ def evaluate_generation(
 
     if rank == 0:
         print(f"(best-of-N) Accuracy on validation set: {cor} / {total} = {cor/total}")
-        print(f"(best-of-N) CoT match on validation set: {cor_cot} / {total} = {cor_cot/total}")
+        print(
+            f"(best-of-N) CoT match on validation set: {cor_cot} / {total} = {cor_cot/total}"
+        )
         print(
             f"(Greedy best-of-1) Accuracy on validation set: {cor_1} / {total} = {cor_1/total}"
         )
@@ -366,5 +433,3 @@ def evaluate_generation(
         wandb_run.log(log_dict)
 
     return cor, cor_cot, cor_1, cor_cot_1, total
-
-

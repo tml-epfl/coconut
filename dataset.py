@@ -16,6 +16,7 @@ from datasets import Dataset
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import pad_without_fast_tokenizer_warning
 
+from eval import generate_with_config
 from preprocessing.prosqa import (
     DAG,
     sample_names_for_dag,
@@ -418,12 +419,18 @@ def generate_dataset(
     min_neg_length: int = 1,
     num_chains: int = 1,
     max_trials: int = 100,
+    teacher: None = False,
+    distillation_config: dict = None,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     with open(names, "r") as file:
         names_list = file.readlines()
     with open(entities, "r") as file:
         entities_list = file.readlines()
+
+    # Prepare distillation config defaults
+    if distillation_config is None:
+        distillation_config = {}
 
     args_list = [
         (
@@ -441,6 +448,8 @@ def generate_dataset(
             min_neg_length,
             num_chains,
             max_trials,
+            teacher,
+            distillation_config,
         )
         for graph_idx in range(size)
     ]
@@ -480,6 +489,8 @@ def _generate_samples_for_graph(args):
         min_neg_length,
         num_chains,
         max_trials,
+        teacher,
+        distillation_config,
     ) = args
 
     # --- this is essentially your current generate_samples body ---
@@ -544,6 +555,90 @@ def _generate_samples_for_graph(args):
                     neg_length=_neg_length,
                     num_chains=num_chains,
                 )
+
+                if teacher is not None and generate_with_config is not None:
+                    # Generate num_chains times with teacher
+                    teacher_model, teacher_tokenizer = teacher
+
+                    # Prepare input for teacher
+                    full_question = context + " " + question
+                    input_ids = teacher_tokenizer.encode(
+                        full_question + "\n",
+                        add_special_tokens=True,
+                        return_tensors="pt",
+                    )
+
+                    # Move to same device as teacher model
+                    device = next(teacher_model.parameters()).device
+                    input_ids = input_ids.to(device)
+
+                    # Get generation parameters from config
+                    sampling_strategy = distillation_config.get(
+                        "distillation_sampling_strategy", "sample"
+                    )
+                    temperature = distillation_config.get(
+                        "distillation_temperature", 0.7
+                    )
+                    top_p = distillation_config.get("distillation_top_p", 0.9)
+                    num_beams = distillation_config.get("distillation_num_beams", None)
+                    max_new_tokens = distillation_config.get(
+                        "distillation_max_new_tokens", 128
+                    )
+
+                    # Determine how many sequences to generate
+                    # If num_chains is -1 (all chains), use a default value for teacher generation
+                    teacher_num_chains = num_chains if num_chains > 0 else 5
+
+                    # Generate teacher_num_chains sequences from teacher
+                    with torch.no_grad():
+                        generated_sequences = generate_with_config(
+                            model=teacher_model,
+                            input_ids=input_ids,
+                            tokenizer=teacher_tokenizer,
+                            max_new_tokens=max_new_tokens,
+                            num_return_sequences=teacher_num_chains,
+                            sampling_strategy=sampling_strategy,
+                            temperature=temperature,
+                            top_p=top_p,
+                            num_beams=num_beams,
+                            pad_token_id=teacher_tokenizer.eos_token_id,
+                            synced_gpus=False,
+                        )
+
+                    # Parse each generation and collect all teacher chains (including incorrect ones)
+                    teacher_chains = []
+                    # Handle shape: if num_return_sequences > 1, generated_sequences is [N, seq_len]
+                    # If num_return_sequences == 1, ensure it's [1, seq_len] for consistent iteration
+                    if generated_sequences.dim() == 1:
+                        generated_sequences = generated_sequences.unsqueeze(0)
+
+                    for seq in generated_sequences:
+                        text_output = teacher_tokenizer.decode(
+                            seq, skip_special_tokens=True
+                        )
+
+                        # Parse steps and answer from output
+                        # Format: question\nstep1\nstep2\n...\n### answer
+                        lines = text_output.split("\n")
+                        # Skip the question (first line), get steps before "###"
+                        steps_text = "\n".join(lines[1:]).split("#")[0].strip()
+                        teacher_steps = [
+                            s.strip() for s in steps_text.split("\n") if s.strip()
+                        ]
+
+                        # Keep all teacher-generated steps (including incorrect ones)
+                        if teacher_steps:
+                            teacher_chains.append(teacher_steps)
+
+                    # Remove duplicate chains (convert to tuples for hashability, then back to lists)
+                    unique_teacher_chains = [
+                        list(t)
+                        for t in dict.fromkeys(tuple(chain) for chain in teacher_chains)
+                    ]
+
+                    # Use unique teacher chains if we got any, otherwise fall back to original
+                    if unique_teacher_chains:
+                        chains = unique_teacher_chains
 
                 return [
                     {
