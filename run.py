@@ -823,7 +823,7 @@ def main(cfg: DictConfig):
             dataset_gen_val,
             num_workers=1,
             pin_memory=True,
-            batch_size=configs.batch_size_training,
+            batch_size=configs.batch_size_generation,
             collate_fn=collator,
             sampler=DistributedSampler(dataset_gen_val, shuffle=False),
         )
