@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from re import I
 from typing import Optional, Tuple
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
 
 import torch
 import torch.distributed as dist
@@ -422,7 +423,7 @@ def generate_dataset(
     num_edges: Tuple[int, int],
     names: str,
     entities: str,
-    dist: str = "gauss",  # "gauss", "unif"
+    dist: str = "gauss", # or "unif"
     length: int = -1,
     min_length: int = 1,
     neg_length: int = -1,
@@ -432,129 +433,151 @@ def generate_dataset(
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     with open(names, "r") as file:
-        names = file.readlines()
+        names_list = file.readlines()
     with open(entities, "r") as file:
-        entities = file.readlines()
+        entities_list = file.readlines()
 
-    def generate_samples(idx: int) -> dict:
-        """
-        Args:
-            idx (int): The index of the sample to generate.
-
-        Returns:
-            dict: A dictionary with "question", "steps", and "answer" keys.
-        """
-        assert (
-            method == "tml" or method == "prosqa"
-        ), f"`method` needs to be either `tml` or `prosqa`"
-
-        if length > 0:
-            assert (
-                length >= min_length
-            ), f"`length` needs to be equal or larger than `min_length`"
-        if neg_length > 0:
-            assert (
-                neg_length >= min_neg_length
-            ), f"`neg_length` needs to be equal or larger than `min_neg_length`"
-
-        if dist == "gauss":
-            dist_fn = random.gauss
-        elif dist == "unif":
-            dist_fn = random.randint
-
-        while True:
-            n_nodes = round(dist_fn(num_nodes[0], num_nodes[1]))
-            n_layers = round(dist_fn(num_layers[0], num_layers[1]))
-            n_edges = round(dist_fn(num_edges[0], num_edges[1]))
-
-            if n_layers <= min_length:
-                n_layers = min_length + 1
-            if n_layers <= min_neg_length:
-                n_layers = min_neg_length + 1
-
-            for _ in range(max_trials):
-                try:
-                    # node_labels tracks family membership (1=family of node 0, 2=family of node 1, etc.)
-                    # Only used for prosqa method
-                    family_labels = None
-
-                    if method == "tml":
-                        dag = DAG.generate_layered_dag(
-                            num_nodes=n_nodes,
-                            num_layers=n_layers,
-                            num_edges=n_edges,
-                        )
-                        assert (
-                            sum([len(e) for e in dag.edges]) == n_edges
-                        ), f"Number of edges {sum([len(e) for e in dag.edges])} is not equal to the given quantity {n_edges}!"
-                        assert (
-                            max(dag.layers) + 1 == n_layers
-                        ), f"Number of layers {max(dag.layers) + 1} is not equal to the given quantity {n_layers}"
-                    elif method == "prosqa":
-                        dag, family_labels = DAG.generate_prosqa_dag(
-                            num_nodes=n_nodes,
-                        )
-                        assert (
-                            max(dag.layers) >= min_length
-                        ), f"Number of layers {max(dag.layers) + 1} is not equal to or greater than the given quantity {min_length + 1}"
-
-                    # if provided 0, sample a random length
-                    max_length = max(dag.layers)
-                    _length = (
-                        random.randint(min_length, max_length)
-                        if length == 0
-                        else length
-                    )
-                    _neg_length = (
-                        random.randint(min_neg_length, max_length)
-                        if neg_length == 0
-                        else neg_length
-                    )
-
-                    # entity_names are the string names for each node
-                    entity_names = sample_names_for_dag(dag, names, entities)
-                    nodes, context, question, chains, answer = generate_query_from_dag(
-                        dag,
-                        entity_names,
-                        node_labels=family_labels,
-                        length=_length,
-                        neg_length=_neg_length,
-                        num_chains=num_chains,
-                    )
-
-                    return [
-                        {
-                            "edges": [
-                                (i, item)
-                                for i, sublist in enumerate(dag.edges)
-                                for item in sublist
-                            ],
-                            "root": nodes[0],
-                            "target": nodes[1],
-                            "neg_target": nodes[2],
-                            "idx_to_symbol": entity_names,
-                            "question": context + " " + question,
-                            "steps": chain,
-                            "answer": answer,
-                            "graph_idx": idx,
-                        }
-                        for chain in chains
-                    ]
-                except KeyboardInterrupt:
-                    raise
-                except:
-                    continue
+    args_list = [
+        (
+            graph_idx,
+            method,
+            num_nodes,
+            num_layers,
+            num_edges,
+            names_list,
+            entities_list,
+            dist,
+            length,
+            min_length,
+            neg_length,
+            min_neg_length,
+            num_chains,
+            max_trials,
+        )
+        for graph_idx in range(size)
+    ]
 
     dataset = []
     sample_id_counter = itertools.count()
 
-    for graph_idx in tqdm(range(size), desc="Generating samples"):
-        batch = generate_samples(graph_idx)
-
-        for sample in batch:
-            sample["idx"] = next(sample_id_counter)
-
-        dataset.extend(batch)
+    with Pool(processes=cpu_count()) as pool:
+        for batch in tqdm(
+            pool.imap_unordered(_generate_samples_for_graph, args_list),
+            total=size,
+            desc="Generating samples",
+        ):
+            for sample in batch:
+                sample["idx"] = next(sample_id_counter)
+            dataset.extend(batch)
 
     with open(path, "w") as f:
         json.dump(dataset, f)
+
+    return dataset
+
+
+def _generate_samples_for_graph(args):
+    (
+        graph_idx,
+        method,
+        num_nodes,
+        num_layers,
+        num_edges,
+        names,
+        entities,
+        dist,
+        length,
+        min_length,
+        neg_length,
+        min_neg_length,
+        num_chains,
+        max_trials,
+    ) = args
+
+    # --- this is essentially your current generate_samples body ---
+    assert method in ("tml", "prosqa"), "`method` needs to be either `tml` or `prosqa`"
+
+    if length > 0:
+        assert length >= min_length
+    if neg_length > 0:
+        assert neg_length >= min_neg_length
+
+    if dist == "gauss":
+        dist_fn = random.gauss
+    elif dist == "unif":
+        dist_fn = random.randint
+    else:
+        raise ValueError(f"Unknown dist {dist}")
+
+    while True:
+        n_nodes = round(dist_fn(num_nodes[0], num_nodes[1]))
+        n_layers = round(dist_fn(num_layers[0], num_layers[1]))
+        n_edges = round(dist_fn(num_edges[0], num_edges[1]))
+
+        if n_layers <= min_length:
+            n_layers = min_length + 1
+        if n_layers <= min_neg_length:
+            n_layers = min_neg_length + 1
+
+        for _ in range(max_trials):
+            try:
+                family_labels = None
+
+                if method == "tml":
+                    dag = DAG.generate_layered_dag(
+                        num_nodes=n_nodes,
+                        num_layers=n_layers,
+                        num_edges=n_edges,
+                    )
+                    assert sum(len(e) for e in dag.edges) == n_edges
+                    assert max(dag.layers) + 1 == n_layers
+                else:  # prosqa
+                    dag, family_labels = DAG.generate_prosqa_dag(
+                        num_nodes=n_nodes,
+                    )
+                    assert max(dag.layers) >= min_length
+
+                max_length = max(dag.layers)
+                _length = (
+                    random.randint(min_length, max_length)
+                    if length == 0
+                    else length
+                )
+                _neg_length = (
+                    random.randint(min_neg_length, max_length)
+                    if neg_length == 0
+                    else neg_length
+                )
+
+                entity_names = sample_names_for_dag(dag, names, entities)
+                nodes, context, question, chains, answer = generate_query_from_dag(
+                    dag,
+                    entity_names,
+                    node_labels=family_labels,
+                    length=_length,
+                    neg_length=_neg_length,
+                    num_chains=num_chains,
+                )
+
+                return [
+                    {
+                        "edges": [
+                            (i, item)
+                            for i, sublist in enumerate(dag.edges)
+                            for item in sublist
+                        ],
+                        "root": nodes[0],
+                        "target": nodes[1],
+                        "neg_target": nodes[2],
+                        "idx_to_symbol": entity_names,
+                        "question": context + " " + question,
+                        "steps": chain,
+                        "answer": answer,
+                        "graph_idx": graph_idx,
+                    }
+                    for chain in chains
+                ]
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                continue
