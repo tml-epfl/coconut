@@ -1175,9 +1175,29 @@ def main(cfg: DictConfig):
             best_acc = cor / total
 
             dist.barrier()
-            del states
-            gc.collect()
-            torch.cuda.empty_cache()
+            if (
+                cor / total > best_acc
+                and configs.save_only_improve
+                and not configs.debug
+                and not configs.only_eval
+            ):
+                states = parallel_model.state_dict()
+
+                if rank == 0:
+                    checkpoint_name = f"checkpoint_{epoch + 1}"
+                    torch.save(states, os.path.join(save_dir, checkpoint_name))
+                    print("saving model.")
+                    _update_manifest(
+                        manifest_path_obj,
+                        {"last_checkpoint": checkpoint_name, "resume_epoch": epoch + 1},
+                    )
+
+                best_acc = cor / total
+
+                dist.barrier()
+                del states
+                gc.collect()
+                torch.cuda.empty_cache()
 
     if rank == 0:
         _update_manifest(manifest_path_obj, {"status": "completed"})
