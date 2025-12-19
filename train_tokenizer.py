@@ -2,12 +2,12 @@
 # All rights reserved.
 
 """
-Train a custom tokenizer for synthetic TML data.
+Train a custom GPT-2 style ByteLevel BPE tokenizer for synthetic TML data.
 
-This script creates a minimal vocabulary tokenizer specifically designed for
-the synthetic reasoning data used in coconut training. The resulting tokenizer
-has a much smaller vocabulary (typically 100-300 tokens) compared to GPT-2's
-50k+ tokens, making the model significantly more efficient.
+This script creates a ByteLevel BPE tokenizer (exactly like GPT-2's tokenizer)
+specifically designed for the synthetic reasoning data used in coconut training.
+The ByteLevel approach handles all bytes uniformly, avoiding spacing issues that
+can occur with Metaspace-based tokenizers.
 
 Usage:
     # Generate data and train tokenizer:
@@ -128,7 +128,12 @@ def train_tokenizer(
     min_frequency: int = 1,
 ) -> Tokenizer:
     """
-    Train a BPE tokenizer on the provided texts.
+    Train a GPT-2 style ByteLevel BPE tokenizer on the provided texts.
+    
+    This uses the exact same tokenization approach as GPT-2:
+    - ByteLevel pre-tokenizer that encodes all bytes
+    - ByteLevel decoder for proper detokenization
+    - No unknown tokens (ByteLevel can represent any byte sequence)
     
     Args:
         texts: List of text strings to train on
@@ -138,24 +143,26 @@ def train_tokenizer(
     Returns:
         Trained Tokenizer object
     """
-    # Initialize BPE tokenizer
+    # Initialize BPE tokenizer (GPT-2 style with ByteLevel doesn't need unk_token
+    # since it can represent any byte, but we include it for safety)
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
     
-    # Set up normalizer (basic unicode normalization)
+    # Set up normalizer (minimal normalization to preserve original text)
+    # GPT-2 uses minimal normalization - just handle line endings consistently
     tokenizer.normalizer = normalizers.Sequence([
-        normalizers.NFKC(),
         normalizers.Replace("\r\n", "\n"),
         normalizers.Replace("\r", "\n"),
     ])
     
-    # Pre-tokenizer: split on whitespace and punctuation, keeping track of spaces
-    tokenizer.pre_tokenizer = pre_tokenizers.Sequence([
-        pre_tokenizers.Metaspace(replacement="▁"),
-        pre_tokenizers.Punctuation(behavior="isolated"),
-    ])
+    # Pre-tokenizer: GPT-2 style ByteLevel
+    # - add_prefix_space=False: don't add space at beginning (GPT-2 default)
+    # - use_regex=True: use GPT-2's regex pattern to split on whitespace boundaries
+    # This splits text like: "Hello world" -> ["Hello", " world"]
+    # The space is kept as part of the token, avoiding spacing issues
+    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
     
-    # Decoder for proper detokenization (matches the Metaspace pre-tokenizer)
-    tokenizer.decoder = decoders.Metaspace(replacement="▁")
+    # Decoder for proper detokenization (ByteLevel decoder matches the pre-tokenizer)
+    tokenizer.decoder = decoders.ByteLevel()
     
     # Special tokens that we need for the model
     special_tokens = [
@@ -167,16 +174,18 @@ def train_tokenizer(
         "<|latent|>",        # Coconut latent token
     ]
     
-    # Train the tokenizer
+    # Train the tokenizer with GPT-2 style settings
+    # initial_alphabet is set to ByteLevel's alphabet to ensure all bytes are covered
     trainer = trainers.BpeTrainer(
         vocab_size=vocab_size,
         min_frequency=min_frequency,
         special_tokens=special_tokens,
+        initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
         show_progress=True,
     )
     
     # Write texts to temporary file for training
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
         for text in texts:
             f.write(text + "\n")
         temp_path = f.name
@@ -218,7 +227,7 @@ def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
 def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
     """Verify the tokenizer works correctly on sample texts."""
     print("\n" + "=" * 60)
-    print("TOKENIZER VERIFICATION")
+    print("TOKENIZER VERIFICATION (GPT-2 Style ByteLevel BPE)")
     print("=" * 60)
     
     print(f"\nVocabulary size: {len(tokenizer)}")
@@ -226,14 +235,47 @@ def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
     print(f"Special token IDs: {tokenizer.all_special_ids}")
     
     print("\n--- Sample tokenizations ---")
+    all_passed = True
     for text in test_texts[:5]:
         tokens = tokenizer.encode(text)
         decoded = tokenizer.decode(tokens)
         token_strs = tokenizer.convert_ids_to_tokens(tokens)
-        print(f"\nOriginal: {repr(text)}")
-        print(f"Tokens:   {token_strs}")
-        print(f"IDs:      {tokens}")
-        print(f"Decoded:  {repr(decoded)}")
+        
+        # Check roundtrip
+        roundtrip_ok = decoded == text
+        status = "✓" if roundtrip_ok else "✗"
+        if not roundtrip_ok:
+            all_passed = False
+        
+        print(f"\n{status} Original: {repr(text)}")
+        print(f"  Tokens:   {token_strs}")
+        print(f"  IDs:      {tokens}")
+        print(f"  Decoded:  {repr(decoded)}")
+        if not roundtrip_ok:
+            print(f"  WARNING: Roundtrip mismatch!")
+    
+    # Test spacing preservation (important for ByteLevel)
+    print("\n--- Spacing preservation tests ---")
+    spacing_tests = [
+        "Hello world",           # Single space
+        "Hello  world",          # Double space
+        " Leading space",        # Leading space
+        "Trailing space ",       # Trailing space
+        "Line1\nLine2",          # Newline
+    ]
+    for text in spacing_tests:
+        tokens = tokenizer.encode(text)
+        decoded = tokenizer.decode(tokens)
+        ok = decoded == text
+        status = "✓" if ok else "✗"
+        if not ok:
+            all_passed = False
+        print(f"{status} {repr(text)} -> {repr(decoded)}")
+    
+    if all_passed:
+        print("\n✓ All roundtrip tests passed!")
+    else:
+        print("\n✗ Some roundtrip tests failed - check the tokenizer configuration")
 
 
 def main():
@@ -327,8 +369,9 @@ def main():
     hf_tokenizer.save_pretrained(output_dir)
     
     print(f"\n{'=' * 60}")
-    print(f"SUCCESS! Tokenizer saved to: {output_dir}")
+    print(f"SUCCESS! GPT-2 style ByteLevel BPE tokenizer saved to: {output_dir}")
     print(f"Vocabulary size: {len(hf_tokenizer)}")
+    print(f"Tokenizer type: ByteLevel BPE (like GPT-2)")
     print(f"{'=' * 60}")
     print(f"\nTo use this tokenizer in training, add to your config:")
     print(f"  tokenizer_path: {output_dir}")
