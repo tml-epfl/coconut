@@ -547,8 +547,15 @@ def main(cfg: DictConfig):
             f"Loading from {configs.load_model_path} and skip the first {configs.resume} epochs"
         )
 
-    tokenizer = AutoTokenizer.from_pretrained(configs.model_id)
-    tokenizer.pad_token = tokenizer.eos_token
+    # Load tokenizer: use custom tokenizer if specified, otherwise use model_id
+    tokenizer_path = getattr(configs, "tokenizer_path", None)
+    if tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", ""):
+        if rank == 0:
+            print(f"Loading custom tokenizer from: {tokenizer_path}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(configs.model_id)
+        tokenizer.pad_token = tokenizer.eos_token
     model_init = getattr(configs, "model_init", "pretrained")
     model_config_overrides = getattr(configs, "model_config_overrides", None) or {}
 
@@ -571,10 +578,13 @@ def main(cfg: DictConfig):
                 "model_config_overrides is only supported when model_init is 'scratch'."
             )
         model = AutoModelForCausalLM.from_pretrained(configs.model_id)
-
-    tokenizer.add_tokens("<|start-latent|>")
-    tokenizer.add_tokens("<|end-latent|>")
-    tokenizer.add_tokens("<|latent|>")
+    # Add latent tokens if not already present (custom tokenizer already has them)
+    using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
+    if not using_custom_tokenizer:
+        tokenizer.add_tokens("<|start-latent|>")
+        tokenizer.add_tokens("<|end-latent|>")
+        tokenizer.add_tokens("<|latent|>")
+    
     latent_id = tokenizer.convert_tokens_to_ids("<|latent|>")
     start_id = tokenizer.convert_tokens_to_ids("<|start-latent|>")
     end_id = tokenizer.convert_tokens_to_ids("<|end-latent|>")
@@ -627,15 +637,20 @@ def main(cfg: DictConfig):
         # if we need new tokens, initialize their embeddings and lm heads
         model.resize_token_embeddings(len(tokenizer))
         embeddings = model.get_input_embeddings()
-        target_id = tokenizer.convert_tokens_to_ids("<<")
-        # initialize the new token embeddings with a known token
-        # it helps stablize the training
-        for token_id in [latent_id, start_id, end_id]:
-            target_embedding = embeddings.weight.data[target_id]
-            embeddings.weight.data[token_id] = target_embedding
-            # The input embeddings and lm heads are tied in GPT2. So the code below is not necessary
-            lm_head = model.lm_head
-            lm_head.weight.data[token_id] = lm_head.weight.data[target_id]
+        
+        # For custom tokenizers, latent tokens are already in vocab - no special init needed
+        # For GPT-2 tokenizer, initialize new token embeddings with a known token
+        using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
+        if not using_custom_tokenizer:
+            target_id = tokenizer.convert_tokens_to_ids("<<")
+            # initialize the new token embeddings with a known token
+            # it helps stabilize the training
+            for token_id in [latent_id, start_id, end_id]:
+                target_embedding = embeddings.weight.data[target_id]
+                embeddings.weight.data[token_id] = target_embedding
+                # The input embeddings and lm heads are tied in GPT2. So the code below is not necessary
+                lm_head = model.lm_head
+                lm_head.weight.data[token_id] = lm_head.weight.data[target_id]
 
     if configs.no_thoughts:
         configs.c_thought = 0
