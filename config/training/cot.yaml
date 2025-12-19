@@ -6,7 +6,6 @@ pad_latent_to_max: true
 uniform_prob: 0.0
 reset_optimizer: true        # GSM8K uses false
 batch_size_training: 32
-batch_size_generation: 1
 gradient_accumulation_steps: 1  # GSM8K uses 1
 num_epochs: 50                  # GSM8K uses 25
 lr: 0.0001
