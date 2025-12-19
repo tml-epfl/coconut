@@ -1136,9 +1136,9 @@ def main(cfg: DictConfig):
                 best_acc = cor / total
 
                 dist.barrier()
-            del states
-            gc.collect()
-            torch.cuda.empty_cache()
+                del states
+                gc.collect()
+                torch.cuda.empty_cache()
 
     if rank == 0:
         _update_manifest(manifest_path_obj, {"status": "completed"})
