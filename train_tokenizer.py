@@ -28,7 +28,14 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from tokenizers import Tokenizer, models, trainers, pre_tokenizers, normalizers, decoders
+from tokenizers import (
+    Tokenizer,
+    models,
+    trainers,
+    pre_tokenizers,
+    normalizers,
+    decoders,
+)
 from tokenizers.processors import TemplateProcessing
 from transformers import PreTrainedTokenizerFast
 
@@ -37,7 +44,7 @@ def collect_texts_from_json(json_paths: List[str]) -> List[str]:
     """Extract all text from JSON data files."""
     texts = []
     for path in json_paths:
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             data = json.load(f)
         for sample in data:
             # Collect question
@@ -72,7 +79,7 @@ def generate_sample_texts(
     # Add all base vocabulary items
     texts.extend(names)
     texts.extend(entities)
-    
+
     # Add common format strings used in the data
     format_strings = [
         "is a",
@@ -129,44 +136,48 @@ def train_tokenizer(
 ) -> Tokenizer:
     """
     Train a BPE tokenizer on the provided texts.
-    
+
     Args:
         texts: List of text strings to train on
         vocab_size: Target vocabulary size
         min_frequency: Minimum frequency for a token to be included
-        
+
     Returns:
         Trained Tokenizer object
     """
     # Initialize BPE tokenizer
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
-    
+
     # Set up normalizer (basic unicode normalization)
-    tokenizer.normalizer = normalizers.Sequence([
-        normalizers.NFKC(),
-        normalizers.Replace("\r\n", "\n"),
-        normalizers.Replace("\r", "\n"),
-    ])
-    
+    tokenizer.normalizer = normalizers.Sequence(
+        [
+            normalizers.NFKC(),
+            normalizers.Replace("\r\n", "\n"),
+            normalizers.Replace("\r", "\n"),
+        ]
+    )
+
     # Pre-tokenizer: split on whitespace and punctuation, keeping track of spaces
-    tokenizer.pre_tokenizer = pre_tokenizers.Sequence([
-        pre_tokenizers.Metaspace(replacement="▁"),
-        pre_tokenizers.Punctuation(behavior="isolated"),
-    ])
-    
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.Metaspace(replacement="▁"),
+            pre_tokenizers.Punctuation(behavior="isolated"),
+        ]
+    )
+
     # Decoder for proper detokenization (matches the Metaspace pre-tokenizer)
     tokenizer.decoder = decoders.Metaspace(replacement="▁")
-    
+
     # Special tokens that we need for the model
     special_tokens = [
-        "<pad>",           # Padding token
-        "<unk>",           # Unknown token
-        "<eos>",           # End of sequence
+        "<pad>",  # Padding token
+        "<unk>",  # Unknown token
+        "<eos>",  # End of sequence
         "<|start-latent|>",  # Coconut latent start
-        "<|end-latent|>",    # Coconut latent end
-        "<|latent|>",        # Coconut latent token
+        "<|end-latent|>",  # Coconut latent end
+        "<|latent|>",  # Coconut latent token
     ]
-    
+
     # Train the tokenizer
     trainer = trainers.BpeTrainer(
         vocab_size=vocab_size,
@@ -174,28 +185,28 @@ def train_tokenizer(
         special_tokens=special_tokens,
         show_progress=True,
     )
-    
+
     # Write texts to temporary file for training
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         for text in texts:
             f.write(text + "\n")
         temp_path = f.name
-    
+
     try:
         tokenizer.train([temp_path], trainer)
     finally:
         os.unlink(temp_path)
-    
+
     return tokenizer
 
 
 def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
     """
     Wrap the trained tokenizer in HuggingFace's PreTrainedTokenizerFast.
-    
+
     Args:
         tokenizer: Trained Tokenizer object
-        
+
     Returns:
         PreTrainedTokenizerFast compatible with transformers library
     """
@@ -208,10 +219,10 @@ def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
         bos_token=None,  # GPT-2 style: no BOS token
         additional_special_tokens=["<|start-latent|>", "<|end-latent|>", "<|latent|>"],
     )
-    
+
     # Set padding side to right (same as GPT-2)
     hf_tokenizer.padding_side = "right"
-    
+
     return hf_tokenizer
 
 
@@ -220,11 +231,11 @@ def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
     print("\n" + "=" * 60)
     print("TOKENIZER VERIFICATION")
     print("=" * 60)
-    
+
     print(f"\nVocabulary size: {len(tokenizer)}")
     print(f"Special tokens: {tokenizer.all_special_tokens}")
     print(f"Special token IDs: {tokenizer.all_special_ids}")
-    
+
     print("\n--- Sample tokenizations ---")
     for text in test_texts[:5]:
         tokens = tokenizer.encode(text)
@@ -283,9 +294,9 @@ def main():
         default=1,
         help="Minimum frequency for tokens",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Collect training texts
     if args.train_files:
         print(f"Loading texts from {len(args.train_files)} files...")
@@ -297,9 +308,9 @@ def main():
             entities_file=args.entities_file,
             num_samples=args.num_samples,
         )
-    
+
     print(f"Collected {len(texts)} text samples")
-    
+
     # Train the tokenizer
     print(f"\nTraining tokenizer with vocab_size={args.vocab_size}...")
     tokenizer = train_tokenizer(
@@ -307,10 +318,10 @@ def main():
         vocab_size=args.vocab_size,
         min_frequency=args.min_frequency,
     )
-    
+
     # Wrap in HuggingFace format
     hf_tokenizer = create_hf_tokenizer(tokenizer)
-    
+
     # Verify the tokenizer
     test_texts = [
         "Max is a storpus.",
@@ -320,12 +331,12 @@ def main():
         "### bompus",
     ]
     verify_tokenizer(hf_tokenizer, test_texts)
-    
+
     # Save the tokenizer
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     hf_tokenizer.save_pretrained(output_dir)
-    
+
     print(f"\n{'=' * 60}")
     print(f"SUCCESS! Tokenizer saved to: {output_dir}")
     print(f"Vocabulary size: {len(hf_tokenizer)}")
@@ -338,4 +349,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

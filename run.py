@@ -99,28 +99,17 @@ class GraphIdxBatchSampler(BatchSampler):
         # Store the fixed groupings for use in __iter__
         self.graph_groups = graph_groups
         self.idx_to_graph = idx_to_graph
+        self._len = 0
 
     def __iter__(self) -> Iterator[List[int]]:
         # 1. Get the current epoch's sampled indices (this is randomized/distributed each time)
         sampled_indices = list(self.sampler)
 
-        # 2. Determine the order of graph_idx groups for this epoch
-        graph_indices_order = []
-        seen_graph_idx = set()
-        for idx in sampled_indices:
-            # Fallback to idx if graph_idx is missing
-            graph_idx = self.idx_to_graph.get(idx, idx)
-
-            # Ensure we only pick up graphs that are part of the sampled set
-            if graph_idx in self.graph_groups and graph_idx not in seen_graph_idx:
-                graph_indices_order.append(graph_idx)
-                seen_graph_idx.add(graph_idx)
-
-        # 3. Create batches with strict batch_size limit, based on the new order
+        # 2. Create batches with strict batch_size limit, based on the new order
         batches: List[List[int]] = []
         current_batch: List[int] = []
 
-        for graph_idx in graph_indices_order:
+        for graph_idx in sampled_indices:
             # Get ALL indices for this graph, not just the sampled ones
             graph_indices_list = self.graph_groups[graph_idx]
 
@@ -138,26 +127,27 @@ class GraphIdxBatchSampler(BatchSampler):
                     batches.append(current_batch)
                     current_batch = []
 
-        # 4. Handle the last batch
+        # 3. Handle the last batch
         if current_batch:
             if not self.drop_last:
                 batches.append(current_batch)
 
-        # 5. Yield the newly calculated batches for this epoch
+        # 4. Yield the newly calculated batches for this epoch
+        self._len = len(batches)
         for batch in batches:
             yield batch
 
-        def __len__(self) -> int:
-            # Since the number of batches can change based on the sampler logic (e.g.,
-            # DistributedSampler), calculating the exact length reliably here is complex.
-            # It's safest to skip the __len__ method and rely on the DataLoader's
-            # internal tracking, or pre-calculate it if necessary (but it's often optional).
-            # We will keep the previous version for simplicity, but note the caveat:
-            # If the batch list is not pre-calculated in __init__, this will be wrong.
-            # For typical training loops, simply removing this method is usually safe.
+    def __len__(self) -> int:
+        # Since the number of batches can change based on the sampler logic (e.g.,
+        # DistributedSampler), calculating the exact length reliably here is complex.
+        # It's safest to skip the __len__ method and rely on the DataLoader's
+        # internal tracking, or pre-calculate it if necessary (but it's often optional).
+        # We will keep the previous version for simplicity, but note the caveat:
+        # If the batch list is not pre-calculated in __init__, this will be wrong.
+        # For typical training loops, simply removing this method is usually safe.
 
-            # For this example, we return 0 to avoid incorrect length.
-            return 0  # Or calculate it by running the full logic, which is slow.
+        # For this example, we return 0 to avoid incorrect length.
+        return self._len  # Or calculate it by running the full logic, which is slow.
 
 
 def _now_iso() -> str:
@@ -579,12 +569,16 @@ def main(cfg: DictConfig):
             )
         model = AutoModelForCausalLM.from_pretrained(configs.model_id)
     # Add latent tokens if not already present (custom tokenizer already has them)
-    using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
+    using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in (
+        "null",
+        "none",
+        "",
+    )
     if not using_custom_tokenizer:
         tokenizer.add_tokens("<|start-latent|>")
         tokenizer.add_tokens("<|end-latent|>")
         tokenizer.add_tokens("<|latent|>")
-    
+
     latent_id = tokenizer.convert_tokens_to_ids("<|latent|>")
     start_id = tokenizer.convert_tokens_to_ids("<|start-latent|>")
     end_id = tokenizer.convert_tokens_to_ids("<|end-latent|>")
@@ -637,10 +631,14 @@ def main(cfg: DictConfig):
         # if we need new tokens, initialize their embeddings and lm heads
         model.resize_token_embeddings(len(tokenizer))
         embeddings = model.get_input_embeddings()
-        
+
         # For custom tokenizers, latent tokens are already in vocab - no special init needed
         # For GPT-2 tokenizer, initialize new token embeddings with a known token
-        using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
+        using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in (
+            "null",
+            "none",
+            "",
+        )
         if not using_custom_tokenizer:
             target_id = tokenizer.convert_tokens_to_ids("<<")
             # initialize the new token embeddings with a known token
@@ -701,7 +699,7 @@ def main(cfg: DictConfig):
             if teacher_model_path and has_load_path(teacher_model_path):
                 if rank == 0:
                     print(f"Loading teacher model from {teacher_model_path}")
-                
+
             # Replace the deepcopy block with this:
             if (
                 getattr(configs, "distillation", False)
@@ -714,25 +712,29 @@ def main(cfg: DictConfig):
                 if model_init == "scratch":
                     for key, value in model_config_overrides.items():
                         setattr(teacher_config, key, value)
-                
+
                 # Create model on CPU directly
                 teacher_model = AutoModelForCausalLM.from_config(teacher_config)
-                
+
                 # Load weights directly into the shell
                 state_dict = torch.load(configs.teacher_model_path, map_location="cpu")
-                
+
                 # Handle Coconut/Base model logic as before
                 if any(k.startswith("base_causallm") for k in state_dict.keys()):
                     base_prefix = "base_causallm."
-                    state_dict = {k[len(base_prefix):]: v for k, v in state_dict.items() if k.startswith(base_prefix)}
-                
+                    state_dict = {
+                        k[len(base_prefix) :]: v
+                        for k, v in state_dict.items()
+                        if k.startswith(base_prefix)
+                    }
+
                 teacher_model.load_state_dict(state_dict)
-                del state_dict # Clean up RAM immediately
-                
+                del state_dict  # Clean up RAM immediately
+
                 teacher_model.eval()
                 for param in teacher_model.parameters():
                     param.requires_grad = False
-                
+
                 # --- ADD THIS LINE HERE ---
                 teacher_model.share_memory()
                 teacher = (teacher_model, tokenizer)
@@ -872,7 +874,6 @@ def main(cfg: DictConfig):
 
     if configs.reset_optimizer:
         optimizer = None
-
     else:
         optimizer = optim.AdamW(
             parallel_model.parameters(),
@@ -942,12 +943,16 @@ def main(cfg: DictConfig):
             multi = getattr(configs, "multi", False)
 
             if multi:
-                # Create a BatchSampler that groups samples by graph_idx
-                distributed_sampler = DistributedSampler(dataset_train, shuffle=True)
+                graph_ids = [dataset_train[i].get("graph_idx", i) for i in range(len(dataset_train))]
+                unique_graph_sampler = DistributedSampler(
+                    list(set(graph_ids)), 
+                    shuffle=True, 
+                    drop_last=False
+                )
                 batch_sampler = GraphIdxBatchSampler(
                     dataset=dataset_train,
                     batch_size=configs.batch_size_training,
-                    sampler=distributed_sampler,
+                    sampler=unique_graph_sampler,
                     drop_last=False,
                 )
 
@@ -1001,7 +1006,7 @@ def main(cfg: DictConfig):
                     lr=configs.lr,
                     weight_decay=configs.weight_decay,
                 )
-
+            optimizer.zero_grad()
             parallel_model.module.train()
 
             total_length = len(train_dataloader) // configs.gradient_accumulation_steps

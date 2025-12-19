@@ -93,6 +93,7 @@ def get_dataset(path, tokenizer, max_size=1000000000):
     )
     if complete_tokenized != expected:
         import warnings
+
         warnings.warn(
             "Tokenization mismatch: separately tokenized parts don't match jointly tokenized text. "
             "This is expected for tokenizers with metaspace behavior after newlines."
