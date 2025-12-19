@@ -1104,6 +1104,12 @@ def main(cfg: DictConfig):
                 gc.collect()
                 torch.cuda.empty_cache()
 
+        # Check if we should evaluate this epoch
+        eval_every = getattr(configs, 'eval_every_n_epochs', 1)
+        is_last_epoch = (epoch + 1) == configs.num_epochs
+        should_eval = (epoch + 1) % eval_every == 0 or is_last_epoch or configs.only_eval
+
+        if should_eval:
             # val loss
             total_loss = 0
 
