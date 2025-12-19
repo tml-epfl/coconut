@@ -422,12 +422,16 @@ def generate_dataset(
     dist: str = "gauss",  # or "unif"
     length: int = -1,
     min_length: int = 1,
+    max_length: int = -1,
     neg_length: int = -1,
     min_neg_length: int = 1,
+    max_neg_length: int = -1,
+    epochs_per_length: int = 0,
     num_chains: int = 1,
     max_trials: int = 100,
     teacher: None = False,
     distillation_config: dict = None,
+    epoch: int = 0,
 ):
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     with open(names, "r") as file:
@@ -441,6 +445,7 @@ def generate_dataset(
 
     args_list = [
         (
+            epoch,
             graph_idx,
             method,
             num_nodes,
@@ -451,8 +456,11 @@ def generate_dataset(
             dist,
             length,
             min_length,
+            max_length,
             neg_length,
             min_neg_length,
+            max_neg_length,
+            epochs_per_length,
             num_chains,
             max_trials,
             teacher,
@@ -482,6 +490,7 @@ def generate_dataset(
 
 def _generate_samples_for_graph(args):
     (
+        epoch,
         graph_idx,
         method,
         num_nodes,
@@ -492,8 +501,11 @@ def _generate_samples_for_graph(args):
         dist,
         length,
         min_length,
+        max_length,
         neg_length,
         min_neg_length,
+        max_neg_length,
+        epochs_per_length,
         num_chains,
         max_trials,
         teacher,
@@ -503,10 +515,20 @@ def _generate_samples_for_graph(args):
     # --- this is essentially your current generate_samples body ---
     assert method in ("tml", "prosqa"), "`method` needs to be either `tml` or `prosqa`"
 
+    if epochs_per_length > 0:
+        if max_length > 0:
+            max_length += epoch // epochs_per_length
+        if max_neg_length > 0:
+            max_neg_length += epoch // epochs_per_length
+
     if length > 0:
         assert length >= min_length
     if neg_length > 0:
         assert neg_length >= min_neg_length
+    if max_length > 0:
+        assert length <= max_length
+    if max_neg_length > 0:
+        assert neg_length <= max_neg_length
 
     if dist == "gauss":
         dist_fn = random.gauss
@@ -543,12 +565,13 @@ def _generate_samples_for_graph(args):
                     )
                     assert max(dag.layers) >= min_length
 
-                max_length = max(dag.layers)
+                max_length = min(max_length, max(dag.layers))
+                max_neg_length = min(max_neg_length, max(dag.layers))
                 _length = (
                     random.randint(min_length, max_length) if length == 0 else length
                 )
                 _neg_length = (
-                    random.randint(min_neg_length, max_length)
+                    random.randint(min_neg_length, max_neg_length)
                     if neg_length == 0
                     else neg_length
                 )
@@ -667,5 +690,5 @@ def _generate_samples_for_graph(args):
                 ]
             except KeyboardInterrupt:
                 raise
-            except Exception:
+            except Exception as e:
                 continue

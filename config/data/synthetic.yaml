@@ -15,8 +15,11 @@ dataset:
   num_edges: [40, 10]
 
   # 0 to randomly sample, -1 for max, positive for fixed length
-  length: -1
+  length: 0
   min_length: 1
-  neg_length: -1
+  max_length: -1
+  neg_length: 0
   min_neg_length: 1
+  max_neg_length: -1
+  epochs_per_length: 0 # if it is positive and `max` are positive, it increase max_length gradually
   max_trials: 100 # maximum number of trials for rejection sampling

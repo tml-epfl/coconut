@@ -150,6 +150,45 @@ class GraphIdxBatchSampler(BatchSampler):
         return self._len  # Or calculate it by running the full logic, which is slow.
 
 
+def _generate_dataset(path, epoch, teacher, distillation_config, **dataset_configs):
+    dataset_configs = dataset_configs.copy()
+    dataset_configs["teacher"] = teacher
+    dataset_configs["distillation_config"] = distillation_config
+
+    if torch.cuda.device_count() > 1:
+        if dist.get_rank() == 0:
+            processed_dataset = [
+                generate_dataset(
+                    path,
+                    **dataset_configs,
+                    epoch=epoch,
+                    names="data/names.txt",
+                    entities="data/entities.txt",
+                )
+            ]
+        else:
+            processed_dataset = [None]
+        dist.broadcast_object_list(processed_dataset, src=0)
+        dataset = processed_dataset[0]
+    else:
+        dataset = generate_dataset(
+            path,
+            **dataset_configs,
+            epoch=epoch,
+            names="data/names.txt",
+            entities="data/entities.txt",
+        )
+    return dataset
+
+
+def _load_val_gt(configs):
+    data = json.load(open(configs.val_path))
+    question_val = [d["question"] for d in data]
+    answers_val = [d["answer"].replace(",", "").strip() for d in data]
+    cot_val = ["\n".join(d["steps"]) for d in data]
+    return question_val, answers_val, cot_val
+
+
 def _now_iso() -> str:
     return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -762,67 +801,32 @@ def main(cfg: DictConfig):
                         "Skipping teacher generation."
                     )
 
-        def _generate_dataset(path, **dataset_configs):
-            dataset_configs = dataset_configs.copy()
-            dataset_configs["teacher"] = teacher
-            dataset_configs["distillation_config"] = distillation_config
-
-            if torch.cuda.device_count() > 1:
-                if dist.get_rank() == 0:
-                    processed_dataset = [
-                        generate_dataset(
-                            path,
-                            **dataset_configs,
-                            names="data/names.txt",
-                            entities="data/entities.txt",
-                        )
-                    ]
-                else:
-                    processed_dataset = [None]
-                dist.broadcast_object_list(processed_dataset, src=0)
-                dataset = processed_dataset[0]
-            else:
-                dataset = generate_dataset(
-                    path,
-                    **dataset_configs,
-                    names="data/names.txt",
-                    entities="data/entities.txt",
-                )
-            return dataset
-
         configs_valid = configs.dataset.copy()
         configs_valid["size"] = abs(configs_valid["size"]["valid"])
         configs_valid["num_chains"] = -1 if configs.multi else 1
         del configs_valid["online"]
-        _generate_dataset(configs.val_path, **configs_valid)
 
         if not configs.only_eval:
             configs_train = configs.dataset.copy()
             configs_train["size"] = abs(configs_train["size"]["train"])
             configs_train["num_chains"] = -1 if configs.multi else 1
             del configs_train["online"]
-            _generate_dataset(configs.train_path, **configs_train)
 
-    def _load_val_gt():
-        data = json.load(open(configs.val_path))
-        question_val = [d["question"] for d in data]
-        answers_val = [d["answer"].replace(",", "").strip() for d in data]
-        cot_val = ["\n".join(d["steps"]) for d in data]
-        return question_val, answers_val, cot_val
+    base_dataset_valid, base_dataset_train = None, None
+    if not (configs.data_type == "synthetic" and configs.dataset.get("online", True)):
+        # prepare the ground truth answer and cot for evaluation
+        question_val, answers_val, cot_val = _load_val_gt(configs)
 
-    # prepare the ground truth answer and cot for evaluation
-    question_val, answers_val, cot_val = _load_val_gt()
-
-    base_dataset_valid = get_dataset(
-        configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
-    )
-
-    if not configs.only_eval:
-        base_dataset_train = get_dataset(
-            configs.train_path,
-            tokenizer,
-            max_size=5000 if configs.debug else 100000000,
+        base_dataset_valid = get_dataset(
+            configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
         )
+
+        if not configs.only_eval:
+            base_dataset_train = get_dataset(
+                configs.train_path,
+                tokenizer,
+                max_size=5000 if configs.debug else 100000000,
+            )
 
     if "gsm" in configs.val_path:
         max_new_tokens = 64
@@ -886,25 +890,34 @@ def main(cfg: DictConfig):
     collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
 
     for epoch in range(configs.resume, configs.num_epochs):
-        if (
-            configs.data_type == "synthetic"
-            and epoch > configs.resume
-            and configs.dataset.get("online", True)
-        ):
-            _generate_dataset(configs.val_path, **configs_valid)
-            question_val, answers_val, cot_val = _load_val_gt()  # <-- critical
+        if configs.data_type == "synthetic" and configs.dataset.get("online", True):
+            _generate_dataset(
+                configs.val_path,
+                epoch=epoch,
+                teacher=teacher,
+                distillation_config=distillation_config,
+                **configs_valid,
+            )
+            question_val, answers_val, cot_val = _load_val_gt(configs)  # <-- critical
             base_dataset_valid = get_dataset(
                 configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
             )
 
             if not configs.only_eval:
-                _generate_dataset(configs.train_path, **configs_train)
+                _generate_dataset(
+                    configs.train_path,
+                    epoch=epoch,
+                    teacher=teacher,
+                    distillation_config=distillation_config,
+                    **configs_train,
+                )
                 base_dataset_train = get_dataset(
                     configs.train_path,
                     tokenizer,
                     max_size=5000 if configs.debug else 100000000,
                 )
-
+        
+        data_stage = 0 if configs.epochs_per_length == 0 else epoch // configs.epochs_per_length
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage
         )
@@ -943,11 +956,12 @@ def main(cfg: DictConfig):
             multi = getattr(configs, "multi", False)
 
             if multi:
-                graph_ids = [dataset_train[i].get("graph_idx", i) for i in range(len(dataset_train))]
+                graph_ids = [
+                    dataset_train[i].get("graph_idx", i)
+                    for i in range(len(dataset_train))
+                ]
                 unique_graph_sampler = DistributedSampler(
-                    list(set(graph_ids)), 
-                    shuffle=True, 
-                    drop_last=False
+                    list(set(graph_ids)), shuffle=True, drop_last=False
                 )
                 batch_sampler = GraphIdxBatchSampler(
                     dataset=dataset_train,
@@ -1067,6 +1081,7 @@ def main(cfg: DictConfig):
                         "train/loss": loss.detach().float()
                         * configs.gradient_accumulation_steps,
                         "train/scheduled_stage": scheduled_stage,
+                        "train/data_stage": data_stage,
                     }
                     wandb_run.log(log_dict)
 
@@ -1118,6 +1133,7 @@ def main(cfg: DictConfig):
                     log_dict = {
                         "eval/loss": total_loss / len(valid_loss_dataloader),
                         "eval/scheduled_stage": scheduled_stage,
+                        "eval/data_stage": data_stage
                     }
                     wandb_run.log(log_dict)
                     print("eval loss", total_loss / len(valid_loss_dataloader))
