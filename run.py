@@ -909,7 +909,7 @@ def main(cfg: DictConfig):
                     max_size=5000 if configs.debug else 100000000,
                 )
         
-        data_stage = 0 if configs.epochs_per_length == 0 else epoch // configs.epochs_per_length
+        data_stage = 0 if configs.dataset.get("epochs_per_length", False) == 0 else epoch // configs.dataset.get("epochs_per_length")
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage
         )
@@ -1136,23 +1136,23 @@ def main(cfg: DictConfig):
                     wandb_run.log(log_dict)
                     print("eval loss", total_loss / len(valid_loss_dataloader))
 
-        # val generation accuracy (moved to eval.py for clarity)
-        cor, cor_cot, cor_1, cor_cot_1, total = evaluate_generation(
-            parallel_model=parallel_model,
-            valid_gen_dataloader=valid_gen_dataloader,
-            tokenizer=tokenizer,
-            answers_val=answers_val,
-            cot_val=cot_val,
-            question_val=question_val,
-            configs=configs,
-            max_new_tokens=max_new_tokens,
-            scheduled_stage=scheduled_stage,
-            rank=rank,
-            wandb_run=wandb_run,
-        )
+            # val generation accuracy (moved to eval.py for clarity)
+            cor, cor_cot, cor_1, cor_cot_1, total = evaluate_generation(
+                parallel_model=parallel_model,
+                valid_gen_dataloader=valid_gen_dataloader,
+                tokenizer=tokenizer,
+                answers_val=answers_val,
+                cot_val=cot_val,
+                question_val=question_val,
+                configs=configs,
+                max_new_tokens=max_new_tokens,
+                scheduled_stage=scheduled_stage,
+                rank=rank,
+                wandb_run=wandb_run,
+            )
 
-        if configs.only_eval:
-            break
+            if configs.only_eval:
+                break
 
         dist.barrier()
         if (
@@ -1175,29 +1175,9 @@ def main(cfg: DictConfig):
             best_acc = cor / total
 
             dist.barrier()
-            if (
-                cor / total > best_acc
-                and configs.save_only_improve
-                and not configs.debug
-                and not configs.only_eval
-            ):
-                states = parallel_model.state_dict()
-
-                if rank == 0:
-                    checkpoint_name = f"checkpoint_{epoch + 1}"
-                    torch.save(states, os.path.join(save_dir, checkpoint_name))
-                    print("saving model.")
-                    _update_manifest(
-                        manifest_path_obj,
-                        {"last_checkpoint": checkpoint_name, "resume_epoch": epoch + 1},
-                    )
-
-                best_acc = cor / total
-
-                dist.barrier()
-                del states
-                gc.collect()
-                torch.cuda.empty_cache()
+            del states
+            gc.collect()
+            torch.cuda.empty_cache()
 
     if rank == 0:
         _update_manifest(manifest_path_obj, {"status": "completed"})
