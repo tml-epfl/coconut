@@ -11,5 +11,3 @@ wandb_entity: tml-coconut
 resume_mode: auto
 resume_attempt_id: null
 signature_ignore_keys: []
-
-
