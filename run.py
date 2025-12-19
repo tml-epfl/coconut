@@ -608,16 +608,12 @@ def main(cfg: DictConfig):
             )
         model = AutoModelForCausalLM.from_pretrained(configs.model_id)
     # Add latent tokens if not already present (custom tokenizer already has them)
-    using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in (
-        "null",
-        "none",
-        "",
-    )
+    using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
     if not using_custom_tokenizer:
         tokenizer.add_tokens("<|start-latent|>")
         tokenizer.add_tokens("<|end-latent|>")
         tokenizer.add_tokens("<|latent|>")
-
+    
     latent_id = tokenizer.convert_tokens_to_ids("<|latent|>")
     start_id = tokenizer.convert_tokens_to_ids("<|start-latent|>")
     end_id = tokenizer.convert_tokens_to_ids("<|end-latent|>")
@@ -670,14 +666,10 @@ def main(cfg: DictConfig):
         # if we need new tokens, initialize their embeddings and lm heads
         model.resize_token_embeddings(len(tokenizer))
         embeddings = model.get_input_embeddings()
-
+        
         # For custom tokenizers, latent tokens are already in vocab - no special init needed
         # For GPT-2 tokenizer, initialize new token embeddings with a known token
-        using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in (
-            "null",
-            "none",
-            "",
-        )
+        using_custom_tokenizer = tokenizer_path and str(tokenizer_path).lower() not in ("null", "none", "")
         if not using_custom_tokenizer:
             target_id = tokenizer.convert_tokens_to_ids("<<")
             # initialize the new token embeddings with a known token
