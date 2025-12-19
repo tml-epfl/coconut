@@ -778,7 +778,7 @@ def main(cfg: DictConfig):
                 config_snapshot_path,
                 base_path=os.path.dirname(config_snapshot_path),
             )
-        text_table = wandb.Table(columns=["step", "text"])
+        # text_table = wandb.Table(columns=["step", "text"])  # Disabled: table logging
 
     else:
         wandb_run = None
@@ -926,28 +926,28 @@ def main(cfg: DictConfig):
             )
 
             for step, batch in enumerate(train_dataloader):
-                if step == 0 and wandb_run and rank == 0:
-                    print("logging training data")
-                    cur_bs = len(batch["input_ids"])
-                    text_str = ""
-                    for data_idx in range(cur_bs):
-                        for token_idx in range(len(batch["input_ids"][data_idx])):
-                            text_str += (
-                                str(batch["input_ids"][data_idx][token_idx].item())
-                                + " "
-                                + str(batch["labels"][data_idx][token_idx].item())
-                                + " "
-                                + tokenizer.decode(
-                                    batch["input_ids"][data_idx][token_idx]
-                                )
-                                + "\n"
-                            )
-                        text_str += "====" * 10 + "\n"
-                    text_table.add_data(total_train_steps, text_str)
-                    # copy the table due to a bug in wandb
-                    # https://github.com/wandb/wandb/issues/2981
-
-                    wandb_run.log({"data_table": copy(text_table)})
+                # Disabled: wandb table logging (can be slow and use lots of memory)
+                # if step == 0 and wandb_run and rank == 0:
+                #     print("logging training data")
+                #     cur_bs = len(batch["input_ids"])
+                #     text_str = ""
+                #     for data_idx in range(cur_bs):
+                #         for token_idx in range(len(batch["input_ids"][data_idx])):
+                #             text_str += (
+                #                 str(batch["input_ids"][data_idx][token_idx].item())
+                #                 + " "
+                #                 + str(batch["labels"][data_idx][token_idx].item())
+                #                 + " "
+                #                 + tokenizer.decode(
+                #                     batch["input_ids"][data_idx][token_idx]
+                #                 )
+                #                 + "\n"
+                #             )
+                #         text_str += "====" * 10 + "\n"
+                #     text_table.add_data(total_train_steps, text_str)
+                #     # copy the table due to a bug in wandb
+                #     # https://github.com/wandb/wandb/issues/2981
+                #     wandb_run.log({"data_table": copy(text_table)})
 
                 total_train_steps += 1
                 batch = {

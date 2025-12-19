@@ -4,4 +4,4 @@ no_thoughts: false
 no_cot: false
 reversed: true
 multi: false
-name: coconut_reversed
+method_name: coconut_reversed
