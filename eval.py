@@ -19,6 +19,7 @@ def generate_with_config(
     temperature: Optional[float] = None,
     top_p: Optional[float] = None,
     num_beams: Optional[int] = None,
+    eos_token_id: Optional[int] = None,
     pad_token_id: Optional[int] = None,
     synced_gpus: bool = False,
     attention_mask: Optional[torch.Tensor] = None,
@@ -36,6 +37,7 @@ def generate_with_config(
         temperature: Sampling temperature (for "sample" strategy)
         top_p: Nucleus sampling parameter (for "sample" strategy)
         num_beams: Number of beams (for "beam" strategy)
+        eos_token_id: End of sequence token ID (defaults to tokenizer.eos_token_id)
         pad_token_id: Padding token ID (defaults to tokenizer.eos_token_id)
         synced_gpus: Whether to sync GPUs (for FSDP)
         attention_mask: Attention mask (optional)
@@ -43,6 +45,8 @@ def generate_with_config(
     Returns:
         Generated sequences [batch_size * num_return_sequences, seq_len] or [batch_size, seq_len] if num_return_sequences=1
     """
+    if eos_token_id is None:
+        eos_token_id = tokenizer.eos_token_id
     if pad_token_id is None:
         pad_token_id = tokenizer.eos_token_id
 
@@ -55,6 +59,7 @@ def generate_with_config(
     generate_kwargs: Dict[str, Any] = {
         "input_ids": input_ids,
         "max_new_tokens": max_new_tokens,
+        "eos_token_id": eos_token_id,
         "pad_token_id": pad_token_id,
         "synced_gpus": synced_gpus,
     }
@@ -199,6 +204,7 @@ def evaluate_generation(
                     num_beams=getattr(configs, "eval_num_beams", eval_best_of)
                     if sampling_strategy == "beam"
                     else None,
+                    eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=tokenizer.eos_token_id,
                     synced_gpus=not configs.only_eval,
                     attention_mask=model_batch.get("attention_mask"),

@@ -28,7 +28,14 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from tokenizers import Tokenizer, models, trainers, pre_tokenizers, normalizers, decoders
+from tokenizers import (
+    Tokenizer,
+    models,
+    trainers,
+    pre_tokenizers,
+    normalizers,
+    decoders,
+)
 from tokenizers.processors import TemplateProcessing
 from transformers import PreTrainedTokenizerFast
 
@@ -37,7 +44,7 @@ def collect_texts_from_json(json_paths: List[str]) -> List[str]:
     """Extract all text from JSON data files."""
     texts = []
     for path in json_paths:
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             data = json.load(f)
         for sample in data:
             # Collect question
@@ -72,7 +79,7 @@ def generate_sample_texts(
     # Add all base vocabulary items
     texts.extend(names)
     texts.extend(entities)
-    
+
     # Add common format strings used in the data
     format_strings = [
         "is a",
@@ -129,51 +136,53 @@ def train_tokenizer(
 ) -> Tokenizer:
     """
     Train a GPT-2 style ByteLevel BPE tokenizer on the provided texts.
-    
+
     This uses the exact same tokenization approach as GPT-2:
     - ByteLevel pre-tokenizer that encodes all bytes
     - ByteLevel decoder for proper detokenization
     - No unknown tokens (ByteLevel can represent any byte sequence)
-    
+
     Args:
         texts: List of text strings to train on
         vocab_size: Target vocabulary size
         min_frequency: Minimum frequency for a token to be included
-        
+
     Returns:
         Trained Tokenizer object
     """
     # Initialize BPE tokenizer (GPT-2 style with ByteLevel doesn't need unk_token
     # since it can represent any byte, but we include it for safety)
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
-    
+
     # Set up normalizer (minimal normalization to preserve original text)
     # GPT-2 uses minimal normalization - just handle line endings consistently
-    tokenizer.normalizer = normalizers.Sequence([
-        normalizers.Replace("\r\n", "\n"),
-        normalizers.Replace("\r", "\n"),
-    ])
-    
+    tokenizer.normalizer = normalizers.Sequence(
+        [
+            normalizers.Replace("\r\n", "\n"),
+            normalizers.Replace("\r", "\n"),
+        ]
+    )
+
     # Pre-tokenizer: GPT-2 style ByteLevel
     # - add_prefix_space=False: don't add space at beginning (GPT-2 default)
     # - use_regex=True: use GPT-2's regex pattern to split on whitespace boundaries
     # This splits text like: "Hello world" -> ["Hello", " world"]
     # The space is kept as part of the token, avoiding spacing issues
     tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-    
+
     # Decoder for proper detokenization (ByteLevel decoder matches the pre-tokenizer)
     tokenizer.decoder = decoders.ByteLevel()
-    
+
     # Special tokens that we need for the model
     special_tokens = [
-        "<pad>",           # Padding token
-        "<unk>",           # Unknown token
-        "<eos>",           # End of sequence
+        "<pad>",  # Padding token
+        "<unk>",  # Unknown token
+        "<eos>",  # End of sequence
         "<|start-latent|>",  # Coconut latent start
-        "<|end-latent|>",    # Coconut latent end
-        "<|latent|>",        # Coconut latent token
+        "<|end-latent|>",  # Coconut latent end
+        "<|latent|>",  # Coconut latent token
     ]
-    
+
     # Train the tokenizer with GPT-2 style settings
     # initial_alphabet is set to ByteLevel's alphabet to ensure all bytes are covered
     trainer = trainers.BpeTrainer(
@@ -183,28 +192,30 @@ def train_tokenizer(
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
         show_progress=True,
     )
-    
+
     # Write texts to temporary file for training
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as f:
         for text in texts:
             f.write(text + "\n")
         temp_path = f.name
-    
+
     try:
         tokenizer.train([temp_path], trainer)
     finally:
         os.unlink(temp_path)
-    
+
     return tokenizer
 
 
 def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
     """
     Wrap the trained tokenizer in HuggingFace's PreTrainedTokenizerFast.
-    
+
     Args:
         tokenizer: Trained Tokenizer object
-        
+
     Returns:
         PreTrainedTokenizerFast compatible with transformers library
     """
@@ -217,10 +228,10 @@ def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
         bos_token=None,  # GPT-2 style: no BOS token
         additional_special_tokens=["<|start-latent|>", "<|end-latent|>", "<|latent|>"],
     )
-    
+
     # Set padding side to right (same as GPT-2)
     hf_tokenizer.padding_side = "right"
-    
+
     return hf_tokenizer
 
 
@@ -229,39 +240,39 @@ def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
     print("\n" + "=" * 60)
     print("TOKENIZER VERIFICATION (GPT-2 Style ByteLevel BPE)")
     print("=" * 60)
-    
+
     print(f"\nVocabulary size: {len(tokenizer)}")
     print(f"Special tokens: {tokenizer.all_special_tokens}")
     print(f"Special token IDs: {tokenizer.all_special_ids}")
-    
+
     print("\n--- Sample tokenizations ---")
     all_passed = True
     for text in test_texts[:5]:
         tokens = tokenizer.encode(text)
         decoded = tokenizer.decode(tokens)
         token_strs = tokenizer.convert_ids_to_tokens(tokens)
-        
+
         # Check roundtrip
         roundtrip_ok = decoded == text
         status = "✓" if roundtrip_ok else "✗"
         if not roundtrip_ok:
             all_passed = False
-        
+
         print(f"\n{status} Original: {repr(text)}")
         print(f"  Tokens:   {token_strs}")
         print(f"  IDs:      {tokens}")
         print(f"  Decoded:  {repr(decoded)}")
         if not roundtrip_ok:
             print(f"  WARNING: Roundtrip mismatch!")
-    
+
     # Test spacing preservation (important for ByteLevel)
     print("\n--- Spacing preservation tests ---")
     spacing_tests = [
-        "Hello world",           # Single space
-        "Hello  world",          # Double space
-        " Leading space",        # Leading space
-        "Trailing space ",       # Trailing space
-        "Line1\nLine2",          # Newline
+        "Hello world",  # Single space
+        "Hello  world",  # Double space
+        " Leading space",  # Leading space
+        "Trailing space ",  # Trailing space
+        "Line1\nLine2",  # Newline
     ]
     for text in spacing_tests:
         tokens = tokenizer.encode(text)
@@ -271,7 +282,7 @@ def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
         if not ok:
             all_passed = False
         print(f"{status} {repr(text)} -> {repr(decoded)}")
-    
+
     if all_passed:
         print("\n✓ All roundtrip tests passed!")
     else:
@@ -325,9 +336,9 @@ def main():
         default=1,
         help="Minimum frequency for tokens",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Collect training texts
     if args.train_files:
         print(f"Loading texts from {len(args.train_files)} files...")
@@ -339,9 +350,9 @@ def main():
             entities_file=args.entities_file,
             num_samples=args.num_samples,
         )
-    
+
     print(f"Collected {len(texts)} text samples")
-    
+
     # Train the tokenizer
     print(f"\nTraining tokenizer with vocab_size={args.vocab_size}...")
     tokenizer = train_tokenizer(
@@ -349,10 +360,10 @@ def main():
         vocab_size=args.vocab_size,
         min_frequency=args.min_frequency,
     )
-    
+
     # Wrap in HuggingFace format
     hf_tokenizer = create_hf_tokenizer(tokenizer)
-    
+
     # Verify the tokenizer
     test_texts = [
         "Max is a storpus.",
@@ -362,12 +373,12 @@ def main():
         "### bompus",
     ]
     verify_tokenizer(hf_tokenizer, test_texts)
-    
+
     # Save the tokenizer
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     hf_tokenizer.save_pretrained(output_dir)
-    
+
     print(f"\n{'=' * 60}")
     print(f"SUCCESS! GPT-2 style ByteLevel BPE tokenizer saved to: {output_dir}")
     print(f"Vocabulary size: {len(hf_tokenizer)}")
