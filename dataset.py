@@ -429,7 +429,7 @@ def generate_dataset(
     epochs_per_length: int = 0,
     num_chains: int = 1,
     max_trials: int = 100,
-    teacher: None = False,
+    teacher: torch.nn.Module = None,
     distillation_config: dict = None,
     epoch: int = 0,
 ):
@@ -557,7 +557,9 @@ def _generate_samples_for_graph(args):
                         num_layers=n_layers,
                         num_edges=n_edges,
                     )
-                    assert sum(len(e) for e in dag.edges) == n_edges
+                    assert (
+                        sum(len(e) for e in dag.edges) == n_edges
+                    ), f"Number of edges {n_edges} do not match {sum(len(e) for e in dag.edges)}"
                     assert max(dag.layers) + 1 == n_layers
                 else:  # prosqa
                     dag, family_labels = DAG.generate_prosqa_dag(
@@ -594,7 +596,7 @@ def _generate_samples_for_graph(args):
                     num_chains=num_chains,
                 )
 
-                if teacher is not None and generate_with_config is not None:
+                if teacher is not None:
                     # Generate num_chains times with teacher
                     teacher_model, teacher_tokenizer = teacher
 

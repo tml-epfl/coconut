@@ -654,18 +654,6 @@ def main(cfg: DictConfig):
             loaded = True
             print(model.load_state_dict(saved_weights, strict=False))
 
-    # Create a copy of the base model for teacher (BEFORE tokens are added and embeddings are resized)
-    # This will be used later if distillation is enabled
-    # We copy before resize_token_embeddings so the copied model has the original vocab size (50257)
-    # which matches the checkpoint vocab size
-    base_model_copy = None
-    if (
-        getattr(configs, "distillation", False)
-        and getattr(configs, "teacher_model_path", None)
-        and has_load_path(getattr(configs, "teacher_model_path", None))
-    ):
-        base_model_copy = deepcopy(model)
-
     if not (configs.cot or configs.no_thoughts or configs.no_cot):
         # if we need new tokens, initialize their embeddings and lm heads
         model.resize_token_embeddings(len(tokenizer))

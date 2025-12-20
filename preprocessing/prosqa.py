@@ -327,7 +327,7 @@ def generate_query_from_dag(
             (a, b, c)
             for a in dag.layer_map[0]
             for b in dag.layer_map[length]
-            for c in dag.layer_map[neg_length]
+            for c in dag.layer_map[neg_length] if not (c in dag.get_descendants(a))
         ]
     random.shuffle(pairs)
 
