@@ -565,13 +565,21 @@ def _generate_samples_for_graph(args):
                     )
                     assert max(dag.layers) >= min_length
 
-                max_length = min(max_length, max(dag.layers))
-                max_neg_length = min(max_neg_length, max(dag.layers))
+                _max_length = (
+                    min(max_length, max(dag.layers))
+                    if max_length > 0
+                    else max(dag.layers)
+                )
+                _max_neg_length = (
+                    min(max_neg_length, max(dag.layers))
+                    if max_neg_length > 0
+                    else max(dag.layers)
+                )
                 _length = (
-                    random.randint(min_length, max_length) if length == 0 else length
+                    random.randint(min_length, _max_length) if length == 0 else length
                 )
                 _neg_length = (
-                    random.randint(min_neg_length, max_neg_length)
+                    random.randint(min_neg_length, _max_neg_length)
                     if neg_length == 0
                     else neg_length
                 )
