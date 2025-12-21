@@ -913,6 +913,27 @@ def main(cfg: DictConfig):
         scheduled_stage = (
             0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage
         )
+
+        dataset_loss_val = get_cot_latent_dataset(
+            scheduled_stage,
+            base_dataset_valid,
+            configs,
+            start_id,
+            latent_id,
+            end_id,
+            no_special_marker=configs.cot or configs.no_cot or configs.no_thoughts,
+        )
+
+        valid_loss_dataloader = torch.utils.data.DataLoader(
+            dataset_loss_val,
+            num_workers=1,
+            shuffle=False,
+            pin_memory=True,
+            batch_size=configs.batch_size_training,
+            collate_fn=collator,
+            sampler=DistributedSampler(dataset_loss_val, shuffle=False),
+        )
+
         dataset_gen_val = get_question_latent_dataset(
             scheduled_stage,
             base_dataset_valid,
@@ -980,29 +1001,6 @@ def main(cfg: DictConfig):
                     collate_fn=collator,
                     sampler=DistributedSampler(dataset_train, shuffle=True),
                 )
-
-            # the sampler is deterministic even if shuffle is set to True
-            # so we have shuffled the dataset when it's constructed (at every epoch).
-
-            dataset_loss_val = get_cot_latent_dataset(
-                scheduled_stage,
-                base_dataset_valid,
-                configs,
-                start_id,
-                latent_id,
-                end_id,
-                no_special_marker=configs.cot or configs.no_cot or configs.no_thoughts,
-            )
-
-            valid_loss_dataloader = torch.utils.data.DataLoader(
-                dataset_loss_val,
-                num_workers=1,
-                shuffle=False,
-                pin_memory=True,
-                batch_size=configs.batch_size_training,
-                collate_fn=collator,
-                sampler=DistributedSampler(dataset_loss_val, shuffle=False),
-            )
 
             if configs.reset_optimizer:
                 del optimizer
