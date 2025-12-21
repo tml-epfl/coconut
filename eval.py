@@ -295,7 +295,10 @@ def evaluate_generation(
 
                         # === compute the correctness of cots for this sample ===
                         matches = [step.strip() for step in cot_output.split("\n")]
-                        for pattern in configs.cot_patterns:
+                        for pattern in configs.cot_patterns.ignore:
+                            matches = [re.sub(pattern, "", match) for match in matches]
+
+                        for pattern in configs.cot_patterns.match:
                             matches = [
                                 (re.search(pattern, match) or match)
                                 if isinstance(match, str)
