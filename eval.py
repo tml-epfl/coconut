@@ -290,7 +290,7 @@ def evaluate_generation(
                             print(
                                 f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
                             )
-                            print(f"Full output: '{tokenizer.decode(seq)}'")
+                            print(f"Full output: '{text_output}'")
                             print(f"Extracted Output: '{answer_output}'")
 
                         # === compute the correctness of cots for this sample ===
