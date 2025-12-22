@@ -35,8 +35,8 @@ from tokenizers import (
     pre_tokenizers,
     normalizers,
     decoders,
+    AddedToken
 )
-from tokenizers.processors import TemplateProcessing
 from transformers import PreTrainedTokenizerFast
 
 
@@ -61,6 +61,7 @@ def generate_sample_texts(
     names_file: str = "data/names.txt",
     entities_file: str = "data/entities.txt",
     num_samples: int = 1000,
+    just_names_entities: bool = False,
 ) -> List[str]:
     """
     Generate sample texts to train the tokenizer on.
@@ -82,15 +83,21 @@ def generate_sample_texts(
 
     # Add common format strings used in the data
     format_strings = [
-        "is a",
+        "Is",
+        "a",
+        "is",
         "Every",
-        "or a",
+        "or",
         "###",
         "?",
         ".",
         "\n",
+        " ", # Explicitly add the space character as a token
     ]
     texts.extend(format_strings)
+
+    if just_names_entities:
+        return texts
 
     # Generate sample queries to capture all patterns
     print(f"Generating {num_samples} sample queries for tokenizer training...")
@@ -208,6 +215,57 @@ def train_tokenizer(
 
     return tokenizer
 
+def train_tokenizer_2(texts: List[str]) -> Tokenizer:
+    # 1. Initialize empty BPE
+    tokenizer = Tokenizer(models.BPE())
+    
+    # 2. IMPROVED Pre-tokenization
+    # Use a regex that keeps spaces, punctuation, and words as separate pieces.
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence([
+        # This regex splits on spaces and punctuation while keeping them all
+        pre_tokenizers.Split(pattern=r"(\s+|[.,!?])", behavior="isolated"),
+    ])
+
+    # 3. Special Tokens
+    special_tokens = ["<pad>", "<unk>", "<eos>", "<|start-latent|>", "<|end-latent|>", "<|latent|>"]
+    tokenizer.add_special_tokens(special_tokens)
+
+    # 4. Atomic Tokens
+    unique_atoms = set()
+    for w in texts:
+        # If it's a multi-character word, add it. 
+        # If it's a single char (like '.'), add it.
+        if w.strip():
+            unique_atoms.add(w.strip())
+
+    unique_atoms.update([" ", ".", "?", "!", "\n"])
+
+    atomic_tokens = []
+    for w in unique_atoms:
+        # RULE: Only use single_word=True for alphanumeric words (like 'Max' or 'storpus')
+        # For punctuation and spaces, single_word MUST be False.
+        is_alphanumeric = w.isalnum()
+        
+        atomic_tokens.append(
+            AddedToken(
+                w, 
+                single_word=is_alphanumeric, 
+                lstrip=False, 
+                rstrip=False
+            )
+        )
+                
+    tokenizer.add_tokens(atomic_tokens)
+
+    # 5. THE DECODER (Crucial for passing the roundtrip test)
+    # This tells the tokenizer how to put the pieces back together.
+    tokenizer.decoder = decoders.Sequence([
+        decoders.Replace(" ", " "), # Ensures space tokens are treated as literal spaces
+        # If you find you have double spaces or specific issues, 
+        # you can add more decoders here.
+    ])
+
+    return tokenizer
 
 def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
     """
@@ -294,6 +352,12 @@ def main():
         description="Train a custom tokenizer for synthetic TML data"
     )
     parser.add_argument(
+        "--method",
+        type=str,
+        default="bpe",
+        help="Method to use: `tml` or `bpe`"
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="tokenizers/tml_custom",
@@ -339,27 +403,45 @@ def main():
 
     args = parser.parse_args()
 
+    assert args.method in ["tml", "bpe"], "method should be either `tml` or `bpe`"
+
     # Collect training texts
     if args.train_files:
         print(f"Loading texts from {len(args.train_files)} files...")
         texts = collect_texts_from_json(args.train_files)
     else:
         print("Generating sample texts for tokenizer training...")
-        texts = generate_sample_texts(
-            names_file=args.names_file,
-            entities_file=args.entities_file,
-            num_samples=args.num_samples,
-        )
+
+        if args.method == "bpe":
+            texts = generate_sample_texts(
+                names_file=args.names_file,
+                entities_file=args.entities_file,
+                num_samples=args.num_samples,
+            )
+        elif args.method == "tml":
+            texts = generate_sample_texts(
+                names_file=args.names_file,
+                entities_file=args.entities_file,
+                num_samples=args.num_samples,
+                just_names_entities=True,
+            )
+
 
     print(f"Collected {len(texts)} text samples")
 
     # Train the tokenizer
     print(f"\nTraining tokenizer with vocab_size={args.vocab_size}...")
-    tokenizer = train_tokenizer(
-        texts=texts,
-        vocab_size=args.vocab_size,
-        min_frequency=args.min_frequency,
-    )
+
+    if args.method == "bpe":
+        tokenizer = train_tokenizer(
+            texts=texts,
+            vocab_size=args.vocab_size,
+            min_frequency=args.min_frequency,
+        )
+    elif args.method == "tml":
+        tokenizer = train_tokenizer_2(
+            texts=texts,
+        )
 
     # Wrap in HuggingFace format
     hf_tokenizer = create_hf_tokenizer(tokenizer)
@@ -388,6 +470,15 @@ def main():
     print(f"  tokenizer_path: {output_dir}")
     print(f"\nOr run training with:")
     print(f"  python run.py model.tokenizer_path={output_dir}")
+    print(f"{'=' * 60}")
+
+    vocab = hf_tokenizer.get_vocab()
+    sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
+
+    print("\n--- Full Vocabulary List ---")
+    for token, token_id in sorted_vocab:
+        # We use repr() to see hidden characters like Ġ (space) or \n
+        print(f"ID {token_id:3}: {repr(token)}")
 
 
 if __name__ == "__main__":
