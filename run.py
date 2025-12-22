@@ -802,7 +802,13 @@ def main(cfg: DictConfig):
 
     base_dataset_valid, base_dataset_train = None, None
     if not (configs.data_type == "synthetic" and configs.dataset.get("online", True)):
-        # prepare the ground truth answer and cot for evaluation
+        _generate_dataset(
+            configs.val_path,
+            epoch=configs.resume,
+            teacher=teacher,
+            distillation_config=distillation_config,
+            **configs_valid,
+        )
         question_val, answers_val, cot_val = _load_val_gt(configs)
 
         base_dataset_valid = get_dataset(
@@ -810,6 +816,13 @@ def main(cfg: DictConfig):
         )
 
         if not configs.only_eval:
+            _generate_dataset(
+                configs.train_path,
+                epoch=configs.resume,
+                teacher=teacher,
+                distillation_config=distillation_config,
+                **configs_train,
+            )
             base_dataset_train = get_dataset(
                 configs.train_path,
                 tokenizer,
