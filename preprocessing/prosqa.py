@@ -71,21 +71,23 @@ class DAG:
         ), "Number of nodes need to be larger than number of layers!"
         for i in range(num_layers):
             node_layers[i] = i
-        nodes_to_assign = list(range(num_layers, num_nodes))
+                
+        if num_nodes > num_layers:
+            nodes_to_assign = list(range(num_layers, num_nodes))
 
-        if layer_probabilities is None:
-            # Uniformly assign the remaining nodes to any layer
-            for node_idx in nodes_to_assign:
-                node_layers[node_idx] = random.choice(layers_of_nodes)
-        else:
-            # Assign remaining nodes based on the provided probability distribution
-            assigned_layers = random.choices(
-                population=layers_of_nodes,
-                weights=layer_probabilities,
-                k=len(nodes_to_assign),
-            )
-            for i, node_idx in enumerate(nodes_to_assign):
-                node_layers[node_idx] = assigned_layers[i]
+            if layer_probabilities is None:
+                # Uniformly assign the remaining nodes to any layer
+                for node_idx in nodes_to_assign:
+                    node_layers[node_idx] = random.choice(layers_of_nodes)
+            else:
+                # Assign remaining nodes based on the provided probability distribution
+                assigned_layers = random.choices(
+                    population=layers_of_nodes,
+                    weights=layer_probabilities,
+                    k=len(nodes_to_assign),
+                )
+                for i, node_idx in enumerate(nodes_to_assign):
+                    node_layers[node_idx] = assigned_layers[i]
 
         # --- Step 2: Create edges based on layers and probability ---
         node_pairs = []
@@ -112,12 +114,13 @@ class DAG:
                     )
 
             # select the rest of the edges
-            edges.extend(
-                random.sample(
-                    population=[pair for pair in node_pairs if not (pair in edges)],
-                    k=num_edges - len(edges),
+            if num_edges - len(edges) > 0:
+                edges.extend(
+                    random.sample(
+                        population=[pair for pair in node_pairs if not (pair in edges)],
+                        k=num_edges - len(edges),
+                    )
                 )
-            )
         else:
             edges = random.sample(
                 population=node_pairs,
