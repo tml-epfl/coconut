@@ -35,7 +35,7 @@ from tokenizers import (
     pre_tokenizers,
     normalizers,
     decoders,
-    AddedToken
+    AddedToken,
 )
 from transformers import PreTrainedTokenizerFast
 
@@ -92,7 +92,7 @@ def generate_sample_texts(
         "?",
         ".",
         "\n",
-        " ", # Explicitly add the space character as a token
+        " ",  # Explicitly add the space character as a token
     ]
     texts.extend(format_strings)
 
@@ -215,25 +215,35 @@ def train_tokenizer(
 
     return tokenizer
 
-def train_tokenizer_2(texts: List[str]) -> Tokenizer:
+
+def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0) -> Tokenizer:
     # 1. Initialize empty BPE
     tokenizer = Tokenizer(models.BPE())
-    
+
     # 2. IMPROVED Pre-tokenization
     # Use a regex that keeps spaces, punctuation, and words as separate pieces.
-    tokenizer.pre_tokenizer = pre_tokenizers.Sequence([
-        # This regex splits on spaces and punctuation while keeping them all
-        pre_tokenizers.Split(pattern=r"(\s+|[.,!?])", behavior="isolated"),
-    ])
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            # This regex splits on spaces and punctuation while keeping them all
+            pre_tokenizers.Split(pattern=r"(\s+|[.,!?])", behavior="isolated"),
+        ]
+    )
 
     # 3. Special Tokens
-    special_tokens = ["<pad>", "<unk>", "<eos>", "<|start-latent|>", "<|end-latent|>", "<|latent|>"]
+    special_tokens = [
+        "<pad>",
+        "<unk>",
+        "<eos>",
+        "<|start-latent|>",
+        "<|end-latent|>",
+        "<|latent|>",
+    ] + [f"<|node_{i}|>" for i in range(1, 1 + n_abstral_tokens)]
     tokenizer.add_special_tokens(special_tokens)
 
     # 4. Atomic Tokens
     unique_atoms = set()
     for w in texts:
-        # If it's a multi-character word, add it. 
+        # If it's a multi-character word, add it.
         # If it's a single char (like '.'), add it.
         if w.strip():
             unique_atoms.add(w.strip())
@@ -245,27 +255,27 @@ def train_tokenizer_2(texts: List[str]) -> Tokenizer:
         # RULE: Only use single_word=True for alphanumeric words (like 'Max' or 'storpus')
         # For punctuation and spaces, single_word MUST be False.
         is_alphanumeric = w.isalnum()
-        
+
         atomic_tokens.append(
-            AddedToken(
-                w, 
-                single_word=is_alphanumeric, 
-                lstrip=False, 
-                rstrip=False
-            )
+            AddedToken(w, single_word=is_alphanumeric, lstrip=False, rstrip=False)
         )
-                
+
     tokenizer.add_tokens(atomic_tokens)
 
     # 5. THE DECODER (Crucial for passing the roundtrip test)
     # This tells the tokenizer how to put the pieces back together.
-    tokenizer.decoder = decoders.Sequence([
-        decoders.Replace(" ", " "), # Ensures space tokens are treated as literal spaces
-        # If you find you have double spaces or specific issues, 
-        # you can add more decoders here.
-    ])
+    tokenizer.decoder = decoders.Sequence(
+        [
+            decoders.Replace(
+                " ", " "
+            ),  # Ensures space tokens are treated as literal spaces
+            # If you find you have double spaces or specific issues,
+            # you can add more decoders here.
+        ]
+    )
 
     return tokenizer
+
 
 def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
     """
@@ -352,10 +362,7 @@ def main():
         description="Train a custom tokenizer for synthetic TML data"
     )
     parser.add_argument(
-        "--method",
-        type=str,
-        default="bpe",
-        help="Method to use: `tml` or `bpe`"
+        "--method", type=str, default="bpe", help="Method to use: `tml` or `bpe`"
     )
     parser.add_argument(
         "--output_dir",
@@ -400,6 +407,12 @@ def main():
         default=1,
         help="Minimum frequency for tokens",
     )
+    parser.add_argument(
+        "--n_abstral_tokens",
+        type=int,
+        default=0,
+        help="The number of tokens for Abstral",
+    )
 
     args = parser.parse_args()
 
@@ -426,7 +439,6 @@ def main():
                 just_names_entities=True,
             )
 
-
     print(f"Collected {len(texts)} text samples")
 
     # Train the tokenizer
@@ -441,6 +453,7 @@ def main():
     elif args.method == "tml":
         tokenizer = train_tokenizer_2(
             texts=texts,
+            n_abstral_tokens=args.n_abstral_tokens,
         )
 
     # Wrap in HuggingFace format

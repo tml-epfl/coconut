@@ -4,6 +4,7 @@ no_thoughts: false
 no_cot: false
 reversed: false
 multi: false
+abstral: false
 distillation: true
 
 # Teacher model path for distillation (should point to a checkpoint file)

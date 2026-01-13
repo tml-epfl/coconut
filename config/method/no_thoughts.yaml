@@ -4,4 +4,5 @@ no_thoughts: true
 no_cot: false
 reversed: false
 multi: false
+abstral: false
 method_name: no_thoughts
