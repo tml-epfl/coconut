@@ -237,7 +237,7 @@ def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0) -> Tokenizer:
         "<|start-latent|>",
         "<|end-latent|>",
         "<|latent|>",
-    ] + [f"<|node_{i}|>" for i in range(1, 1 + n_abstral_tokens)]
+    ] + [f"<|node_{i}|>" for i in range(n_abstral_tokens)]
     tokenizer.add_special_tokens(special_tokens)
 
     # 4. Atomic Tokens
@@ -277,7 +277,9 @@ def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0) -> Tokenizer:
     return tokenizer
 
 
-def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
+def create_hf_tokenizer(
+    tokenizer: Tokenizer, n_abstral_tokens: int = 0
+) -> PreTrainedTokenizerFast:
     """
     Wrap the trained tokenizer in HuggingFace's PreTrainedTokenizerFast.
 
@@ -294,7 +296,8 @@ def create_hf_tokenizer(tokenizer: Tokenizer) -> PreTrainedTokenizerFast:
         pad_token="<pad>",
         eos_token="<eos>",
         bos_token=None,  # GPT-2 style: no BOS token
-        additional_special_tokens=["<|start-latent|>", "<|end-latent|>", "<|latent|>"],
+        additional_special_tokens=["<|start-latent|>", "<|end-latent|>", "<|latent|>"]
+        + [f"<|node_{i}|>" for i in range(n_abstral_tokens)],
     )
 
     # Set padding side to right (same as GPT-2)
@@ -315,7 +318,7 @@ def verify_tokenizer(tokenizer: PreTrainedTokenizerFast, test_texts: List[str]):
 
     print("\n--- Sample tokenizations ---")
     all_passed = True
-    for text in test_texts[:5]:
+    for text in test_texts:
         tokens = tokenizer.encode(text)
         decoded = tokenizer.decode(tokens)
         token_strs = tokenizer.convert_ids_to_tokens(tokens)
@@ -457,7 +460,10 @@ def main():
         )
 
     # Wrap in HuggingFace format
-    hf_tokenizer = create_hf_tokenizer(tokenizer)
+    hf_tokenizer = create_hf_tokenizer(
+        tokenizer,
+        n_abstral_tokens=args.n_abstral_tokens,
+    )
 
     # Verify the tokenizer
     test_texts = [
@@ -466,6 +472,8 @@ def main():
         "Is Max a bompus or a rompus?",
         "Max is a bompus.",
         "### bompus",
+        "<|start-latent|><|latent|><|latent|><|end-latent|>",
+        "Every <|node_1|> is a <|node_2|>",
     ]
     verify_tokenizer(hf_tokenizer, test_texts)
 

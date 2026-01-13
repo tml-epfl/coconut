@@ -27,7 +27,7 @@ from preprocessing.prosqa import (
 def get_dataset(path, tokenizer, abstral=False, max_size=1000000000):
     def abstral_text(text, idx_to_symbol):
         for idx, symbol in enumerate(idx_to_symbol):
-            text = text.replace(symbol, f"<node_{idx}>")
+            text = text.replace(symbol, f"<|node_{idx}|>")
         return text
 
     def abstral_sample(sample):
