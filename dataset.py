@@ -24,8 +24,24 @@ from preprocessing.prosqa import (
 )
 
 
-def get_dataset(path, tokenizer, max_size=1000000000):
+def get_dataset(path, tokenizer, abstral=False, max_size=1000000000):
+    def abstral_text(text, idx_to_symbol):
+        for idx, symbol in enumerate(idx_to_symbol):
+            text = text.replace(symbol, f"<node_{idx}>")
+        return text
+
+    def abstral_sample(sample):
+        idx_to_symbol = sample["idx_to_symbol"]
+        sample["question"] = abstral_text(sample["question"], idx_to_symbol)
+        for i in range(len(sample["steps"])):
+            sample["steps"][i] = abstral_text(sample["steps"][i], idx_to_symbol)
+        sample["answer"] = abstral_text(sample["answer"], idx_to_symbol)
+        return sample
+
     def tokenize_sample(sample):
+        if abstral:
+            sample = abstral_sample(sample)
+
         question_tokenized = tokenizer.encode(
             sample["question"] + "\n", add_special_tokens=True
         )
@@ -239,7 +255,9 @@ def get_question_latent_dataset(
 
             if eval_with_visible_steps:
                 # Number of steps being abstracted is determined by scheduled_stage
-                n_abstracted_steps = min(scheduled_stage, len(sample["steps_tokenized"]))
+                n_abstracted_steps = min(
+                    scheduled_stage, len(sample["steps_tokenized"])
+                )
                 # Number of latent tokens is based on abstracted steps, capped by max_latent_stage
                 n_latent_tokens = (
                     min(max_latent_stage, n_abstracted_steps) * configs.c_thought
@@ -280,7 +298,9 @@ def get_question_latent_dataset(
                     )
             else:
                 # Original logic: n_latent_tokens based on scheduled_stage capped by max_latent_stage
-                n_latent_tokens = min(max_latent_stage, scheduled_stage) * configs.c_thought
+                n_latent_tokens = (
+                    min(max_latent_stage, scheduled_stage) * configs.c_thought
+                )
                 tokens = (
                     sample["question_tokenized"]
                     + ([] if no_special_marker else [start_id])

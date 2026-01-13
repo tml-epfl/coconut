@@ -812,7 +812,10 @@ def main(cfg: DictConfig):
         question_val, answers_val, cot_val = _load_val_gt(configs)
 
         base_dataset_valid = get_dataset(
-            configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
+            configs.val_path,
+            tokenizer,
+            abstral=configs.abstral,
+            max_size=32 if configs.debug else 100000000,
         )
 
         if not configs.only_eval:
@@ -826,6 +829,7 @@ def main(cfg: DictConfig):
             base_dataset_train = get_dataset(
                 configs.train_path,
                 tokenizer,
+                abstral=configs.abstral,
                 max_size=5000 if configs.debug else 100000000,
             )
 
@@ -901,7 +905,10 @@ def main(cfg: DictConfig):
             )
             question_val, answers_val, cot_val = _load_val_gt(configs)  # <-- critical
             base_dataset_valid = get_dataset(
-                configs.val_path, tokenizer, max_size=32 if configs.debug else 100000000
+                configs.val_path,
+                tokenizer,
+                abstral=configs.abstral,
+                max_size=32 if configs.debug else 100000000,
             )
 
             if not configs.only_eval:
@@ -915,6 +922,7 @@ def main(cfg: DictConfig):
                 base_dataset_train = get_dataset(
                     configs.train_path,
                     tokenizer,
+                    abstral=configs.abstral,
                     max_size=5000 if configs.debug else 100000000,
                 )
 
