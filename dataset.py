@@ -6,7 +6,7 @@ import itertools
 import random
 from dataclasses import dataclass
 from re import I
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union, List
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 
@@ -437,9 +437,9 @@ def generate_dataset(
     path: str,
     size: int,
     method: str,
-    num_nodes: Tuple[int, int],
-    num_layers: Tuple[int, int],
-    num_edges: Tuple[int, int],
+    num_nodes: Union[List[Tuple[int, int]], Tuple[int, int]],
+    num_layers: Union[List[Tuple[int, int]], Tuple[int, int]],
+    num_edges: Union[List[Tuple[int, int]], Tuple[int, int]],
     names: str,
     entities: str,
     dist: str = "gauss",  # or "unif"
@@ -456,7 +456,26 @@ def generate_dataset(
     distillation_config: dict = None,
     epoch: int = 0,
 ):
+    if not isinstance(num_nodes[0], int):
+        assert (
+            epochs_per_length > 0
+        ), "`epochs_per_length` should be larger than 0 for multi-stage training"
+
+        index = min(len(num_nodes) - 1, epoch // epochs_per_length)
+        num_nodes = num_nodes[index]
+        num_layers = num_layers[index]
+        num_edges = num_edges[index]
+
+    if epochs_per_length > 0:
+        if max_length > 0:
+            max_length += epoch // epochs_per_length
+        if max_neg_length > 0:
+            max_neg_length += epoch // epochs_per_length
+
     print(f"Generating dataset with size {size} and outputting to path {path}!")
+    print(
+        f"Parameters: num_nodes - {num_nodes}, num_layers - {num_layers}, num_edges - {num_edges}, length - {length}, min_length - {min_length}, max_length - {max_length}, neg_length - {neg_length}, min_neg_length - {min_neg_length}, max_neg_length - {max_neg_length}"
+    )
     with open(names, "r") as file:
         names_list = file.readlines()
     with open(entities, "r") as file:
@@ -483,7 +502,6 @@ def generate_dataset(
             neg_length,
             min_neg_length,
             max_neg_length,
-            epochs_per_length,
             num_chains,
             max_trials,
             teacher,
@@ -528,7 +546,6 @@ def _generate_samples_for_graph(args):
         neg_length,
         min_neg_length,
         max_neg_length,
-        epochs_per_length,
         num_chains,
         max_trials,
         teacher,
@@ -537,12 +554,6 @@ def _generate_samples_for_graph(args):
 
     # --- this is essentially your current generate_samples body ---
     assert method in ("tml", "prosqa"), "`method` needs to be either `tml` or `prosqa`"
-
-    if epochs_per_length > 0:
-        if max_length > 0:
-            max_length += epoch // epochs_per_length
-        if max_neg_length > 0:
-            max_neg_length += epoch // epochs_per_length
 
     if length > 0:
         assert length >= min_length
