@@ -1169,6 +1169,7 @@ def main(cfg: DictConfig):
                 max_new_tokens=max_new_tokens,
                 scheduled_stage=scheduled_stage,
                 rank=rank,
+                abstral=configs.abstral,
                 wandb_run=wandb_run,
             )
 

@@ -7,6 +7,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from preprocessing.prosqa import DAG
+from abstral import deabstral_text
 
 
 def generate_with_config(
@@ -126,6 +127,7 @@ def evaluate_generation(
     max_new_tokens: int,
     scheduled_stage: int,
     rank: int,
+    abstral: bool = False,
     wandb_run=None,
 ) -> Tuple[int, int, int, int, int]:
     """
@@ -266,12 +268,17 @@ def evaluate_generation(
 
                     for sample_id in range(eval_best_of):
                         seq = gen_seqs[i, sample_id]
-                        text_output = tokenizer.decode(seq, skip_special_tokens=True)
+                        full_output = tokenizer.decode(seq)
+
+                        if abstral:
+                            full_output = deabstral_text(full_output, graph_data["idx_to_symbol"])
+
                         answer_output = (
-                            text_output.split("#")[-1].replace(",", "").strip()
+                            full_output.split("#")[-1].replace(",", "").strip()
                         )
+                        answer_output = answer_output.replace("<eos>", "") # remove <eos> token at the end
                         cot_output = (
-                            ("\n".join(text_output.split("\n")[1:]))
+                            ("\n".join(full_output.split("\n")[1:]))
                             .split("#")[0]
                             .strip()
                         )
@@ -290,7 +297,7 @@ def evaluate_generation(
                             print(
                                 f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
                             )
-                            print(f"Full output: '{tokenizer.decode(seq)}'")
+                            print(f"Full output: '{full_output}'")
                             print(f"Extracted Output: '{answer_output}'")
 
                         # === compute the correctness of cots for this sample ===
