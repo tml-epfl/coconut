@@ -1,0 +1,58 @@
+# @package _global_
+
+defaults:
+  - /config
+  - override /data: synthetic
+  - override /model: gpt2_scratch_small
+  - _self_
+
+model:
+  tokenizer_path: tokenizers/abstral
+  model_config_overrides:
+    n_embd: 128
+    n_head: 2
+    n_layer: 4
+
+method:
+  abstral: true
+
+run:
+  experiment_name: abstral
+
+training:
+  epochs_per_stage: 5
+  eval_every_n_epochs: 5
+  lr: 0.001
+  weight_decay: 0
+  num_epochs: 50
+
+data:
+  dataset:
+    online: true
+    method: tml
+    num_nodes:
+      - [3, 9]
+      - [5, 15]
+      - [7, 21]
+      - [9, 27]
+      - [11, 33]
+    num_layers: 
+      - [2, 2]
+      - [2, 3]
+      - [2, 4]
+      - [2, 5]
+      - [2, 6]    
+    num_edges:
+      - [3, 15]
+      - [5, 25]
+      - [7, 35]
+      - [9, 45]
+      - [11, 55]
+    dist: unif
+    length: 0
+    min_length: 1
+    max_length: 1
+    neg_length: 0
+    min_neg_length: 1
+    max_neg_length: 1
+    epochs_per_length: 5
