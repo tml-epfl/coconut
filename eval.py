@@ -271,6 +271,7 @@ def evaluate_generation(
                         full_output = tokenizer.decode(seq)
 
                         if abstral:
+                            preabstral_output = full_output
                             full_output = deabstral_text(full_output, graph_data["idx_to_symbol"])
 
                         answer_output = (
@@ -299,6 +300,9 @@ def evaluate_generation(
                             )
                             print(f"Full output: '{full_output}'")
                             print(f"Extracted Output: '{answer_output}'")
+
+                            if abstral:
+                                print(f"Preabstral output: '{preabstral_output}'")
 
                         # === compute the correctness of cots for this sample ===
                         matches = [step.strip() for step in cot_output.split("\n")]
