@@ -1,0 +1,10 @@
+model_id: multihop_reasoner
+model_init: scratch
+model_config_overrides:
+  use_mlp: false
+  max_position_embeddings: 1024
+
+# Custom tokenizer path (set to use a smaller vocabulary tokenizer)
+# Train a custom tokenizer with: python train_tokenizer.py --output_dir tokenizers/tml_custom
+# Then set: tokenizer_path: tokenizers/tml_custom
+tokenizer_path: null

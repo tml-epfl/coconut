@@ -71,7 +71,7 @@ class DAG:
         ), "Number of nodes need to be larger than number of layers!"
         for i in range(num_layers):
             node_layers[i] = i
-                
+
         if num_nodes > num_layers:
             nodes_to_assign = list(range(num_layers, num_nodes))
 
@@ -330,7 +330,8 @@ def generate_query_from_dag(
             (a, b, c)
             for a in dag.layer_map[0]
             for b in dag.layer_map[length]
-            for c in dag.layer_map[neg_length] if not (c in dag.get_descendants(a))
+            for c in dag.layer_map[neg_length]
+            if not (c in dag.get_descendants(a))
         ]
     random.shuffle(pairs)
 

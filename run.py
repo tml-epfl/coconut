@@ -45,6 +45,7 @@ from utils import (
     get_git_metadata,
     set_seed,
 )
+from model import MultiHopConfig, MultiHopForCausalLM
 
 MANIFEST_FILENAME = "run_manifest.yaml"
 CONFIG_SNAPSHOT_FILENAME = "config.yaml"
@@ -594,7 +595,12 @@ def main(cfg: DictConfig):
             "Expected one of ['pretrained', 'scratch']."
         )
 
-    if model_init == "scratch":
+    if configs.model_id == "multihop_reasoner":
+        AutoConfig.register("multihop_reasoner", MultiHopConfig)
+        AutoModelForCausalLM.register(MultiHopConfig, MultiHopForCausalLM)
+        config = MultiHopConfig(**configs.model_config_overrides)
+        model = AutoModelForCausalLM.from_config(config)
+    elif model_init == "scratch":
         model_config = AutoConfig.from_pretrained(configs.model_id)
         for key, value in model_config_overrides.items():
             setattr(model_config, key, value)

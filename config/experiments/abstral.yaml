@@ -10,8 +10,8 @@ model:
   tokenizer_path: tokenizers/abstral
   model_config_overrides:
     n_embd: 128
-    n_head: 2
-    n_layer: 4
+    n_head: 4
+    n_layer: 2
 
 method:
   abstral: true
@@ -20,11 +20,11 @@ run:
   experiment_name: abstral
 
 training:
-  epochs_per_stage: 5
+  epochs_per_stage: 50
   eval_every_n_epochs: 5
   lr: 0.001
   weight_decay: 0
-  num_epochs: 50
+  num_epochs: 250
 
 data:
   dataset:
@@ -55,4 +55,4 @@ data:
     neg_length: 0
     min_neg_length: 1
     max_neg_length: 1
-    epochs_per_length: 5
+    epochs_per_length: 50

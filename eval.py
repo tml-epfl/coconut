@@ -272,12 +272,16 @@ def evaluate_generation(
 
                         if abstral:
                             preabstral_output = full_output
-                            full_output = deabstral_text(full_output, graph_data["idx_to_symbol"])
+                            full_output = deabstral_text(
+                                full_output, graph_data["idx_to_symbol"]
+                            )
 
                         answer_output = (
                             full_output.split("#")[-1].replace(",", "").strip()
                         )
-                        answer_output = answer_output.replace("<eos>", "") # remove <eos> token at the end
+                        answer_output = answer_output.replace(
+                            "<eos>", ""
+                        )  # remove <eos> token at the end
                         cot_output = (
                             ("\n".join(full_output.split("\n")[1:]))
                             .split("#")[0]
@@ -295,6 +299,7 @@ def evaluate_generation(
                             and rank == 0
                             and sample_id == 0
                         ):
+                            print("\n")
                             print(
                                 f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
                             )
