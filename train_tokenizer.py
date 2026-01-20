@@ -62,6 +62,7 @@ def generate_sample_texts(
     entities_file: str = "data/entities.txt",
     num_samples: int = 1000,
     just_names_entities: bool = False,
+    merge_whitespace: bool = False
 ) -> List[str]:
     """
     Generate sample texts to train the tokenizer on.
@@ -82,18 +83,32 @@ def generate_sample_texts(
     texts.extend(entities)
 
     # Add common format strings used in the data
-    format_strings = [
-        "Is",
-        "a",
-        "is",
-        "Every",
-        "or",
-        "###",
-        "?",
-        ".",
-        "\n",
-        " ",  # Explicitly add the space character as a token
-    ]
+    if merge_whitespace:
+        format_strings = [
+            " Is ",
+            " a ",
+            " or a ",
+            " Every ",
+            " is a ",
+            "###",
+            "?",
+            ".",
+            "\n",
+            " "
+        ]
+    else:
+        format_strings = [
+            "Is",
+            "a",
+            "is",
+            "Every",
+            "or",
+            "###",
+            "?",
+            ".",
+            "\n",
+            " ",  # Explicitly add the space character as a token
+        ]
     texts.extend(format_strings)
 
     if just_names_entities:
@@ -216,7 +231,7 @@ def train_tokenizer(
     return tokenizer
 
 
-def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0) -> Tokenizer:
+def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0, merge_whitespace: bool = False) -> Tokenizer:
     # 1. Initialize empty BPE
     tokenizer = Tokenizer(models.BPE())
 
@@ -245,7 +260,9 @@ def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0) -> Tokenizer:
     for w in texts:
         # If it's a multi-character word, add it.
         # If it's a single char (like '.'), add it.
-        if w.strip():
+        if merge_whitespace:
+            unique_atoms.add(w)
+        elif w.strip():
             unique_atoms.add(w.strip())
 
     unique_atoms.update([" ", ".", "?", "!", "\n"])
@@ -368,6 +385,9 @@ def main():
         "--method", type=str, default="bpe", help="Method to use: `tml` or `bpe`"
     )
     parser.add_argument(
+        "--merge_whitespace", type=str, action="store_true", help="Merges whitespace to formatting tokens"
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="tokenizers/tml_custom",
@@ -440,6 +460,7 @@ def main():
                 entities_file=args.entities_file,
                 num_samples=args.num_samples,
                 just_names_entities=True,
+                merge_whitespace=args.merge_whitespace,
             )
 
     print(f"Collected {len(texts)} text samples")
@@ -457,6 +478,7 @@ def main():
         tokenizer = train_tokenizer_2(
             texts=texts,
             n_abstral_tokens=args.n_abstral_tokens,
+            merge_whitespace=args.merge_whitespace,
         )
 
     # Wrap in HuggingFace format
