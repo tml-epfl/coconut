@@ -64,7 +64,7 @@ def generate_sample_texts(
     max_entities: int = 38,
     num_samples: int = 1000,
     just_names_entities: bool = False,
-    merge_whitespace: bool = False
+    merge_whitespace: bool = False,
 ) -> List[str]:
     """
     Generate sample texts to train the tokenizer on.
@@ -101,7 +101,7 @@ def generate_sample_texts(
             "?",
             ".",
             "\n",
-            " "
+            " ",
         ]
     else:
         format_strings = [
@@ -238,7 +238,9 @@ def train_tokenizer(
     return tokenizer
 
 
-def train_tokenizer_2(texts: List[str], n_abstral_tokens: int = 0, merge_whitespace: bool = False) -> Tokenizer:
+def train_tokenizer_2(
+    texts: List[str], n_abstral_tokens: int = 0, merge_whitespace: bool = False
+) -> Tokenizer:
     # 1. Initialize empty BPE
     tokenizer = Tokenizer(models.BPE())
 
@@ -392,7 +394,9 @@ def main():
         "--method", type=str, default="bpe", help="Method to use: `tml` or `bpe`"
     )
     parser.add_argument(
-        "--merge_whitespace", action="store_true", help="Merges whitespace to formatting tokens"
+        "--merge_whitespace",
+        action="store_true",
+        help="Merges whitespace to formatting tokens",
     )
     parser.add_argument(
         "--output_dir",

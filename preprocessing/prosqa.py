@@ -508,7 +508,10 @@ def get_statistics(file: str) -> None:
     plt.tight_layout()
     plt.show()
 
-def read_names_and_entities(max_names: int = 0, max_entities: int = 0) -> Tuple[List[str], List[str]]:
+
+def read_names_and_entities(
+    max_names: int = 0, max_entities: int = 0
+) -> Tuple[List[str], List[str]]:
     with open("data/names.txt", "r") as file:
         names_list = file.readlines()
     with open("data/entities.txt", "r") as file:

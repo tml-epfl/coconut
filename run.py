@@ -151,7 +151,15 @@ class GraphIdxBatchSampler(BatchSampler):
         return self._len  # Or calculate it by running the full logic, which is slow.
 
 
-def _generate_dataset(path, epoch, teacher, distillation_config, names_list, entities_list, **dataset_configs):
+def _generate_dataset(
+    path,
+    epoch,
+    teacher,
+    distillation_config,
+    names_list,
+    entities_list,
+    **dataset_configs,
+):
     dataset_configs = dataset_configs.copy()
     dataset_configs["teacher"] = teacher
     dataset_configs["distillation_config"] = distillation_config
@@ -722,6 +730,15 @@ def main(cfg: DictConfig):
         print(parallel_model)
 
     if configs.data_type == "synthetic":
+        # Prepare name and entity lists
+        names_list, entities_list = read_names_and_entities(
+            configs.dataset.get("max_names", 0), configs.dataset.get("max_entities", 0)
+        )
+        if "max_names" in configs.dataset:
+            del configs.dataset.max_names
+        if "max_entities" in configs.dataset:
+            del configs.dataset.max_entities
+
         # Prepare teacher model if distillation is enabled
         teacher = None
         distillation_config = {}
@@ -806,7 +823,6 @@ def main(cfg: DictConfig):
             configs_train["num_chains"] = -1 if configs.multi else 1
             del configs_train["online"]
 
-    names_list, entities_list = read_names_and_entities(configs.dataset.get("max_names", 0), configs.dataset.get("max_entities", 0))
     base_dataset_valid, base_dataset_train = None, None
     if not (configs.data_type == "synthetic" and configs.dataset.get("online", True)):
         _generate_dataset(
