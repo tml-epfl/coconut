@@ -428,8 +428,8 @@ def generate_dataset(
     num_nodes: Union[List[Tuple[int, int]], Tuple[int, int]],
     num_layers: Union[List[Tuple[int, int]], Tuple[int, int]],
     num_edges: Union[List[Tuple[int, int]], Tuple[int, int]],
-    names: str,
-    entities: str,
+    names_list: List[str],
+    entities_list: List[str],
     dist: str = "gauss",  # or "unif"
     length: int = -1,
     min_length: int = 1,
@@ -464,10 +464,6 @@ def generate_dataset(
     print(
         f"Parameters: num_nodes - {num_nodes}, num_layers - {num_layers}, num_edges - {num_edges}, length - {length}, min_length - {min_length}, max_length - {max_length}, neg_length - {neg_length}, min_neg_length - {min_neg_length}, max_neg_length - {max_neg_length}"
     )
-    with open(names, "r") as file:
-        names_list = file.readlines()
-    with open(entities, "r") as file:
-        entities_list = file.readlines()
 
     # Prepare distillation config defaults
     if distillation_config is None:

@@ -60,6 +60,8 @@ def collect_texts_from_json(json_paths: List[str]) -> List[str]:
 def generate_sample_texts(
     names_file: str = "data/names.txt",
     entities_file: str = "data/entities.txt",
+    max_names: int = 17,
+    max_entities: int = 38,
     num_samples: int = 1000,
     just_names_entities: bool = False,
     merge_whitespace: bool = False
@@ -75,6 +77,11 @@ def generate_sample_texts(
         names = [line.strip() for line in f.readlines() if line.strip()]
     with open(entities_file, "r") as f:
         entities = [line.strip() for line in f.readlines() if line.strip()]
+
+    if max_names > 0:
+        names = names[:max_entities]
+    if max_entities > 0:
+        entities = entities[:max_entities]
 
     texts = []
 
@@ -385,7 +392,7 @@ def main():
         "--method", type=str, default="bpe", help="Method to use: `tml` or `bpe`"
     )
     parser.add_argument(
-        "--merge_whitespace", type=str, action="store_true", help="Merges whitespace to formatting tokens"
+        "--merge_whitespace", action="store_true", help="Merges whitespace to formatting tokens"
     )
     parser.add_argument(
         "--output_dir",
@@ -398,6 +405,18 @@ def main():
         type=int,
         default=200,
         help="Target vocabulary size (default: 200)",
+    )
+    parser.add_argument(
+        "--max_names",
+        type=int,
+        default=17,
+        help="The maximum number of names to use",
+    )
+    parser.add_argument(
+        "--max_entities",
+        type=int,
+        default=38,
+        help="The maximum number of entities to use",
     )
     parser.add_argument(
         "--train_files",
@@ -453,6 +472,8 @@ def main():
                 names_file=args.names_file,
                 entities_file=args.entities_file,
                 num_samples=args.num_samples,
+                max_names=args.max_names,
+                max_entities=args.max_entities,
             )
         elif args.method == "tml":
             texts = generate_sample_texts(
@@ -461,6 +482,8 @@ def main():
                 num_samples=args.num_samples,
                 just_names_entities=True,
                 merge_whitespace=args.merge_whitespace,
+                max_names=args.max_names,
+                max_entities=args.max_entities,
             )
 
     print(f"Collected {len(texts)} text samples")

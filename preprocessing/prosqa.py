@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 import random, math, json
 import traceback
 
@@ -507,3 +507,16 @@ def get_statistics(file: str) -> None:
 
     plt.tight_layout()
     plt.show()
+
+def read_names_and_entities(max_names: int = 0, max_entities: int = 0) -> Tuple[List[str], List[str]]:
+    with open("data/names.txt", "r") as file:
+        names_list = file.readlines()
+    with open("data/entities.txt", "r") as file:
+        entities_list = file.readlines()
+
+    if max_names > 0:
+        names_list = names_list[:max_names]
+    if max_entities > 0:
+        entities_list = entities_list[:max_entities]
+
+    return names_list, entities_list

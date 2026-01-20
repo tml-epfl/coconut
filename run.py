@@ -29,7 +29,7 @@ from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from tqdm import tqdm
 
-from preprocessing.prosqa import DAG
+from preprocessing.prosqa import read_names_and_entities
 from eval import evaluate_generation
 from coconut import Coconut
 from dataset import (
@@ -151,7 +151,7 @@ class GraphIdxBatchSampler(BatchSampler):
         return self._len  # Or calculate it by running the full logic, which is slow.
 
 
-def _generate_dataset(path, epoch, teacher, distillation_config, **dataset_configs):
+def _generate_dataset(path, epoch, teacher, distillation_config, names_list, entities_list, **dataset_configs):
     dataset_configs = dataset_configs.copy()
     dataset_configs["teacher"] = teacher
     dataset_configs["distillation_config"] = distillation_config
@@ -163,8 +163,8 @@ def _generate_dataset(path, epoch, teacher, distillation_config, **dataset_confi
                     path,
                     **dataset_configs,
                     epoch=epoch,
-                    names="data/names.txt",
-                    entities="data/entities.txt",
+                    names_list=names_list,
+                    entities_list=entities_list,
                 )
             ]
         else:
@@ -176,8 +176,8 @@ def _generate_dataset(path, epoch, teacher, distillation_config, **dataset_confi
             path,
             **dataset_configs,
             epoch=epoch,
-            names="data/names.txt",
-            entities="data/entities.txt",
+            names_list=names_list,
+            entities_list=entities_list,
         )
     return dataset
 
@@ -806,6 +806,7 @@ def main(cfg: DictConfig):
             configs_train["num_chains"] = -1 if configs.multi else 1
             del configs_train["online"]
 
+    names_list, entities_list = read_names_and_entities(configs.dataset.get("max_names", 0), configs.dataset.get("max_entities", 0))
     base_dataset_valid, base_dataset_train = None, None
     if not (configs.data_type == "synthetic" and configs.dataset.get("online", True)):
         _generate_dataset(
@@ -813,6 +814,8 @@ def main(cfg: DictConfig):
             epoch=configs.resume,
             teacher=teacher,
             distillation_config=distillation_config,
+            names_list=names_list,
+            entities_list=entities_list,
             **configs_valid,
         )
         question_val, answers_val, cot_val = _load_val_gt(configs)
@@ -830,6 +833,8 @@ def main(cfg: DictConfig):
                 epoch=configs.resume,
                 teacher=teacher,
                 distillation_config=distillation_config,
+                names_list=names_list,
+                entities_list=entities_list,
                 **configs_train,
             )
             base_dataset_train = get_dataset(
@@ -907,6 +912,8 @@ def main(cfg: DictConfig):
                 epoch=epoch,
                 teacher=teacher,
                 distillation_config=distillation_config,
+                names_list=names_list,
+                entities_list=entities_list,
                 **configs_valid,
             )
             question_val, answers_val, cot_val = _load_val_gt(configs)  # <-- critical
@@ -923,6 +930,8 @@ def main(cfg: DictConfig):
                     epoch=epoch,
                     teacher=teacher,
                     distillation_config=distillation_config,
+                    names_list=names_list,
+                    entities_list=entities_list,
                     **configs_train,
                 )
                 base_dataset_train = get_dataset(

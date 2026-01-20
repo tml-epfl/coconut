@@ -4,6 +4,8 @@ val_path: null
 dataset:
   method: tml
   online: True
+  max_names: 17 # default for prosqa
+  max_entities: 38 # default for prosqa
   size:
     train: 17886
     valid: 300
