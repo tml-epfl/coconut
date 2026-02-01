@@ -24,5 +24,4 @@ wandb_entity: tml-coconut
 resume_mode: never
 resume_attempt_id: null
 signature_ignore_keys: []
-
-
+n_abstral_tokens: 50

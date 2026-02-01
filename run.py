@@ -632,6 +632,10 @@ def main(cfg: DictConfig):
         tokenizer.add_tokens("<|end-latent|>")
         tokenizer.add_tokens("<|latent|>")
 
+        if configs.abstral:
+            for i in range(configs.n_abstral_tokens):
+                tokenizer.add_tokens(f"<|node_{i}|>")
+
     latent_id = tokenizer.convert_tokens_to_ids("<|latent|>")
     start_id = tokenizer.convert_tokens_to_ids("<|start-latent|>")
     end_id = tokenizer.convert_tokens_to_ids("<|end-latent|>")
