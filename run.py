@@ -699,6 +699,48 @@ def main(cfg: DictConfig):
         configs.c_thought = 0
         configs.coconut = False
 
+    if not configs.debug and not configs.only_eval and rank == 0:
+        wandb_entity = getattr(configs, "wandb_entity", None)
+        if isinstance(wandb_entity, str) and wandb_entity.lower() == "none":
+            wandb_entity = None
+        wandb_entity = wandb_entity or os.environ.get("WANDB_ENTITY")
+
+        wandb_kwargs = {
+            "project": str(configs.experiment_name),
+            "name": str(experiment_signature),
+            "group": str(experiment_signature),
+        }
+        if wandb_entity:
+            wandb_kwargs["entity"] = wandb_entity
+
+        wandb_run = wandb.init(**wandb_kwargs)
+        wandb_run.config.update(
+            OmegaConf.to_container(configs, resolve=True), allow_val_change=True
+        )
+        wandb_run.config.update(
+            {
+                "experiment_name": str(configs.experiment_name),
+                "outputs_root": str(configs.outputs_root),
+                "experiment_signature": experiment_signature,
+                "run_id": attempt_info["attempt_id"],
+                "run_dir": save_dir,
+                "attempt_id": attempt_info["attempt_id"],  # legacy alias
+                "resume_mode": resume_mode,
+                "resume_attempt_id": resume_attempt_id,
+            },
+            allow_val_change=True,
+        )
+        if config_snapshot_path and os.path.exists(config_snapshot_path):
+            wandb_run.save(
+                config_snapshot_path,
+                base_path=os.path.dirname(config_snapshot_path),
+            )
+        # text_table = wandb.Table(columns=["step", "text"])  # Disabled: table logging
+
+    else:
+        wandb_run = None
+
+
     if configs.coconut:
         model = Coconut(model, latent_id, start_id, end_id, tokenizer.eos_token_id)
 
@@ -870,47 +912,6 @@ def main(cfg: DictConfig):
         max_new_tokens = 128
 
     total_train_steps = 0
-
-    if not configs.debug and not configs.only_eval and rank == 0:
-        wandb_entity = getattr(configs, "wandb_entity", None)
-        if isinstance(wandb_entity, str) and wandb_entity.lower() == "none":
-            wandb_entity = None
-        wandb_entity = wandb_entity or os.environ.get("WANDB_ENTITY")
-
-        wandb_kwargs = {
-            "project": str(configs.experiment_name),
-            "name": str(experiment_signature),
-            "group": str(experiment_signature),
-        }
-        if wandb_entity:
-            wandb_kwargs["entity"] = wandb_entity
-
-        wandb_run = wandb.init(**wandb_kwargs)
-        wandb_run.config.update(
-            OmegaConf.to_container(configs, resolve=True), allow_val_change=True
-        )
-        wandb_run.config.update(
-            {
-                "experiment_name": str(configs.experiment_name),
-                "outputs_root": str(configs.outputs_root),
-                "experiment_signature": experiment_signature,
-                "run_id": attempt_info["attempt_id"],
-                "run_dir": save_dir,
-                "attempt_id": attempt_info["attempt_id"],  # legacy alias
-                "resume_mode": resume_mode,
-                "resume_attempt_id": resume_attempt_id,
-            },
-            allow_val_change=True,
-        )
-        if config_snapshot_path and os.path.exists(config_snapshot_path):
-            wandb_run.save(
-                config_snapshot_path,
-                base_path=os.path.dirname(config_snapshot_path),
-            )
-        # text_table = wandb.Table(columns=["step", "text"])  # Disabled: table logging
-
-    else:
-        wandb_run = None
 
     if configs.reset_optimizer:
         optimizer = None
