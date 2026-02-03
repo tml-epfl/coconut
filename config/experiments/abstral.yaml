@@ -22,34 +22,35 @@ run:
   n_abstral_tokens: 50
 
 training:
-  epochs_per_stage: 50
-  eval_every_n_epochs: 5
+  epochs_per_stage: 100
+  eval_every_n_epochs: 10
   lr: 0.001
   weight_decay: 0
-  num_epochs: 250
+  num_epochs: 400
+  batch_size_training: 256
 
 data:
   dataset:
     online: true
     method: tml
+    max_names: 100
+    max_entities: 1000
+    unified_names_entities: true
     num_nodes:
       - [3, 9]
       - [5, 15]
       - [7, 21]
       - [9, 27]
-      - [11, 33]
     num_layers: 
       - [2, 3]
       - [2, 3]
       - [2, 4]
       - [2, 5]
-      - [2, 6]    
     num_edges:
       - [3, 15]
       - [5, 25]
       - [7, 35]
       - [9, 45]
-      - [11, 55]
     dist: unif
     length: 0
     min_length: 1
@@ -57,4 +58,4 @@ data:
     neg_length: 0
     min_neg_length: 1
     max_neg_length: 1
-    epochs_per_length: 50
+    epochs_per_length: 100
