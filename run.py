@@ -743,7 +743,6 @@ def main(cfg: DictConfig):
     else:
         wandb_run = None
 
-
     if configs.coconut:
         model = Coconut(model, latent_id, start_id, end_id, tokenizer.eos_token_id)
 
@@ -889,6 +888,9 @@ def main(cfg: DictConfig):
             configs.val_path,
             tokenizer,
             abstral=configs.abstral,
+            abstral_subsample=configs.abstral_subsample,
+            abstral_shuffle=configs.abstral_shuffle,
+            n_abstral_tokens=configs.n_abstral_tokens,
             max_size=32 if configs.debug else 100000000,
         )
 
@@ -906,6 +908,9 @@ def main(cfg: DictConfig):
                 configs.train_path,
                 tokenizer,
                 abstral=configs.abstral,
+                abstral_subsample=configs.abstral_subsample,
+                abstral_shuffle=configs.abstral_shuffle,
+                n_abstral_tokens=configs.n_abstral_tokens,
                 max_size=5000 if configs.debug else 100000000,
             )
 
@@ -945,6 +950,9 @@ def main(cfg: DictConfig):
                 configs.val_path,
                 tokenizer,
                 abstral=configs.abstral,
+                abstral_subsample=configs.abstral_subsample,
+                abstral_shuffle=configs.abstral_shuffle,
+                n_abstral_tokens=configs.n_abstral_tokens,
                 max_size=32 if configs.debug else 100000000,
             )
 
@@ -962,6 +970,9 @@ def main(cfg: DictConfig):
                     configs.train_path,
                     tokenizer,
                     abstral=configs.abstral,
+                    abstral_subsample=configs.abstral_subsample,
+                    abstral_shuffle=configs.abstral_shuffle,
+                    n_abstral_tokens=configs.n_abstral_tokens,
                     max_size=5000 if configs.debug else 100000000,
                 )
 

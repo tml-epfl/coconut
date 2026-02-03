@@ -177,7 +177,8 @@ def evaluate_generation(
                 model_batch = {
                     k: v.to(rank)
                     for k, v in batch.items()
-                    if v is not None and k not in ["idx", "graph", "abstral_tokens", "position_ids"]
+                    if v is not None
+                    and k not in ["idx", "graph", "abstral_tokens", "position_ids"]
                 }
 
                 if isinstance(model_batch["input_ids"], torch.Tensor):

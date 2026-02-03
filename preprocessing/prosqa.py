@@ -102,7 +102,7 @@ class DAG:
         if strict:
             edges = []
 
-            # select at least one edge per non-root nodes
+            # select at least one edge per non-root nodes (to previous layer)
             for b in range(num_nodes):
                 node_pairs_b = [pair for pair in node_pairs if pair[-1] == b]
                 if node_layers[b] > 0:
@@ -110,6 +110,17 @@ class DAG:
                         (
                             random.choice(node_pairs_b)[0],
                             b,
+                        )
+                    )
+
+            # select at least one edge per root nodes
+            for a in range(num_nodes):
+                edges_a = [pair for pair in node_pairs if pair[0] == a]
+                if node_layers[a] == 0 and (not (a in [edge[0] for edge in edges])):
+                    edges.append(
+                        (
+                            a,
+                            random.choice(edges_a)[1],
                         )
                     )
 
@@ -129,6 +140,7 @@ class DAG:
 
         for edge in edges:
             graph[edge[0]].append(edge[1])
+
         return DAG(list(graph.keys()), node_layers, list(graph.values()))
 
     @staticmethod
@@ -293,10 +305,10 @@ def generate_query_from_dag(
 
     if entities is None:
         entities = [f"ent{i}" for i in range(len(dag.nodes))]
-    entities = [
-        entities[i].capitalize() if dag.layers[i] == 0 else entities[i]
-        for i in range(len(dag.nodes))
-    ]
+    # entities = [
+    #     entities[i].capitalize() if dag.layers[i] == 0 else entities[i]
+    #     for i in range(len(dag.nodes))
+    # ]
 
     if length == -1:
         length = max(dag.layers)

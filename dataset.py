@@ -25,10 +25,20 @@ from preprocessing.prosqa import (
 from abstral import abstral_sample
 
 
-def get_dataset(path, tokenizer, abstral=False, max_size=1000000000):
+def get_dataset(
+    path,
+    tokenizer,
+    abstral=False,
+    abstral_subsample=True,
+    abstral_shuffle=True,
+    n_abstral_tokens=50,
+    max_size=1000000000,
+):
     def tokenize_sample(sample):
         if abstral:
-            sample = abstral_sample(sample)
+            sample = abstral_sample(
+                sample, abstral_subsample, abstral_shuffle, n_abstral_tokens
+            )
 
         question_tokenized = tokenizer.encode(
             sample["question"] + "\n", add_special_tokens=True
@@ -56,7 +66,9 @@ def get_dataset(path, tokenizer, abstral=False, max_size=1000000000):
                 "target": sample["target"],
                 "neg_target": sample["neg_target"],
             },
-            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
+            "abstral_tokens": sample["abstral_tokens"]
+            if "abstral_tokens" in sample
+            else None,
         }
 
         return sample
@@ -309,7 +321,9 @@ def get_question_latent_dataset(
             "attention_mask": [1] * len(tokens),
             "position_ids": list(range(len(tokens))),
             "graph": sample["graph"],
-            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
+            "abstral_tokens": sample["abstral_tokens"]
+            if "abstral_tokens" in sample
+            else None,
         }
 
     return base_dataset_valid.map(
@@ -401,7 +415,9 @@ def get_cot_latent_dataset(
             "graph_idx": sample["graph_idx"],
             "position_ids": list(range(len(tokens))),
             "graph": sample["graph"],
-            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
+            "abstral_tokens": sample["abstral_tokens"]
+            if "abstral_tokens" in sample
+            else None,
         }
 
     if torch.cuda.device_count() > 1:
@@ -498,7 +514,7 @@ def generate_dataset(
             max_trials,
             teacher,
             distillation_config,
-            unified_names_entities
+            unified_names_entities,
         )
         for graph_idx in range(size)
     ]
@@ -614,7 +630,9 @@ def _generate_samples_for_graph(args):
                     else neg_length
                 )
 
-                entity_names = sample_names_for_dag(dag, names, entities, unified_names_entities)
+                entity_names = sample_names_for_dag(
+                    dag, names, entities, unified_names_entities
+                )
                 nodes, context, question, chains, answer = generate_query_from_dag(
                     dag,
                     entity_names,
