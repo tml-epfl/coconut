@@ -92,10 +92,10 @@ def generate_sample_texts(
     # Add common format strings used in the data
     if merge_whitespace:
         format_strings = [
-            " Is ",
+            "Is ",
             " a ",
             " or a ",
-            " Every ",
+            "Every ",
             " is a ",
             "###",
             "?",
