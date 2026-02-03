@@ -56,6 +56,7 @@ def get_dataset(path, tokenizer, abstral=False, max_size=1000000000):
                 "target": sample["target"],
                 "neg_target": sample["neg_target"],
             },
+            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
         }
 
         return sample
@@ -160,6 +161,7 @@ class MyCollator:
 
         # Extract graphs before processing
         graphs = [feature.pop("graph", None) for feature in features]
+        abstral_tokens = [feature.pop("abstral_tokens", None) for feature in features]
 
         non_label_position_features = [
             {
@@ -216,6 +218,9 @@ class MyCollator:
         # Add graphs back as a list (not tensorized)
         if graphs[0] is not None:
             batch["graph"] = graphs
+
+        if abstral_tokens[0] is not None:
+            batch["abstral_tokens"] = abstral_tokens
 
         return batch
 
@@ -304,6 +309,7 @@ def get_question_latent_dataset(
             "attention_mask": [1] * len(tokens),
             "position_ids": list(range(len(tokens))),
             "graph": sample["graph"],
+            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
         }
 
     return base_dataset_valid.map(
@@ -395,6 +401,7 @@ def get_cot_latent_dataset(
             "graph_idx": sample["graph_idx"],
             "position_ids": list(range(len(tokens))),
             "graph": sample["graph"],
+            "abstral_tokens": sample["abstral_tokens"] if "abstral_tokens" in sample else None,
         }
 
     if torch.cuda.device_count() > 1:

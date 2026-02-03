@@ -1109,7 +1109,7 @@ def main(cfg: DictConfig):
                 batch = {
                     key: batch[key].to(rank)
                     for key in batch.keys()
-                    if key not in ("idx", "graph_idx", "graph")
+                    if key not in ("idx", "graph_idx", "graph", "abstral_tokens")
                 }
 
                 outputs = parallel_model(**batch)
@@ -1179,7 +1179,7 @@ def main(cfg: DictConfig):
                     batch = {
                         key: batch[key].to(rank)
                         for key in batch.keys()
-                        if key not in ("idx", "graph_idx", "graph")
+                        if key not in ("idx", "graph_idx", "graph", "abstral_tokens")
                     }
 
                     outputs = parallel_model(**batch)

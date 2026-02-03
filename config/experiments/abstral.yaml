@@ -19,13 +19,14 @@ method:
 
 run:
   experiment_name: abstral
+  n_abstral_tokens: 50
 
 training:
-  epochs_per_stage: 100
+  epochs_per_stage: 50
   eval_every_n_epochs: 5
   lr: 0.001
   weight_decay: 0
-  num_epochs: 500
+  num_epochs: 250
 
 data:
   dataset:
@@ -56,4 +57,4 @@ data:
     neg_length: 0
     min_neg_length: 1
     max_neg_length: 1
-    epochs_per_length: 100
+    epochs_per_length: 50

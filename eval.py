@@ -171,11 +171,13 @@ def evaluate_generation(
                 # Keep indices and graphs on CPU; move only tensor inputs to device
                 batch_idx_tensor = batch["idx"]
                 batch_graphs = batch["graph"]
+                if abstral:
+                    abstral_tokens = batch["abstral_tokens"]
 
                 model_batch = {
                     k: v.to(rank)
                     for k, v in batch.items()
-                    if v is not None and k not in ["idx", "graph", "position_ids"]
+                    if v is not None and k not in ["idx", "graph", "abstral_tokens", "position_ids"]
                 }
 
                 if isinstance(model_batch["input_ids"], torch.Tensor):
@@ -240,6 +242,9 @@ def evaluate_generation(
 
                     # extract the related graph data (shared across samples)
                     graph_data = batch_graphs[i]
+                    if abstral:
+                        abstral_data = abstral_tokens[i]
+
                     symbol_to_idx = {
                         symbol: j
                         for j, symbol in enumerate(graph_data["idx_to_symbol"])
@@ -273,7 +278,7 @@ def evaluate_generation(
                         if abstral:
                             preabstral_output = full_output
                             full_output = deabstral_text(
-                                full_output, graph_data["idx_to_symbol"]
+                                full_output, graph_data["idx_to_symbol"], abstral_data
                             )
 
                         answer_output = (
