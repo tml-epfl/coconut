@@ -6,6 +6,8 @@ dataset:
   online: True
   max_names: 17 # default for prosqa
   max_entities: 38 # default for prosqa
+  unified_names_entities: False # default for prosqa
+
   size:
     train: 17886
     valid: 300

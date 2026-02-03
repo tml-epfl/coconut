@@ -410,6 +410,7 @@ def sample_names_for_dag(
     dag: DAG,
     names: Union[str, List[str]],
     entities: Union[str, List[str]],
+    unified_names_entities: bool = False,
 ) -> List[str]:
     if isinstance(names, str):
         with open(names, "r") as file:
@@ -418,9 +419,12 @@ def sample_names_for_dag(
         with open(entities, "r") as file:
             entities = file.readlines()
 
-    n_root = len(dag.layer_map[0])
-    names = random.sample(names, n_root)
-    entities = names + random.sample(entities, len(dag.nodes) - n_root)
+    if unified_names_entities:
+        entities = random.sample(entities, len(dag.nodes))
+    else:
+        n_root = len(dag.layer_map[0])
+        names = random.sample(names, n_root)
+        entities = names + random.sample(entities, len(dag.nodes) - n_root)
     entities = [entity.strip() for entity in entities]
 
     ind = 0

@@ -450,6 +450,7 @@ def generate_dataset(
     teacher: torch.nn.Module = None,
     distillation_config: dict = None,
     epoch: int = 0,
+    unified_names_entities: bool = False,
 ):
     if not isinstance(num_nodes[0], int):
         assert (
@@ -469,7 +470,7 @@ def generate_dataset(
 
     print(f"Generating dataset with size {size} and outputting to path {path}!")
     print(
-        f"Parameters: num_nodes - {num_nodes}, num_layers - {num_layers}, num_edges - {num_edges}, length - {length}, min_length - {min_length}, max_length - {max_length}, neg_length - {neg_length}, min_neg_length - {min_neg_length}, max_neg_length - {max_neg_length}"
+        f"Parameters: num_nodes - {num_nodes}, num_layers - {num_layers}, num_edges - {num_edges}, length - {length}, min_length - {min_length}, max_length - {max_length}, neg_length - {neg_length}, min_neg_length - {min_neg_length}, max_neg_length - {max_neg_length} - unified_names_entities {unified_names_entities}"
     )
 
     # Prepare distillation config defaults
@@ -497,6 +498,7 @@ def generate_dataset(
             max_trials,
             teacher,
             distillation_config,
+            unified_names_entities
         )
         for graph_idx in range(size)
     ]
@@ -541,6 +543,7 @@ def _generate_samples_for_graph(args):
         max_trials,
         teacher,
         distillation_config,
+        unified_names_entities,
     ) = args
 
     # --- this is essentially your current generate_samples body ---
@@ -611,7 +614,7 @@ def _generate_samples_for_graph(args):
                     else neg_length
                 )
 
-                entity_names = sample_names_for_dag(dag, names, entities)
+                entity_names = sample_names_for_dag(dag, names, entities, unified_names_entities)
                 nodes, context, question, chains, answer = generate_query_from_dag(
                     dag,
                     entity_names,
