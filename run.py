@@ -607,6 +607,7 @@ def main(cfg: DictConfig):
         AutoConfig.register("multihop_reasoner", MultiHopConfig)
         AutoModelForCausalLM.register(MultiHopConfig, MultiHopForCausalLM)
         config = MultiHopConfig(**configs.model_config_overrides)
+        config.vocab_size = len(tokenizer)  # Align vocab size with tokenizer
         model = AutoModelForCausalLM.from_config(config)
     elif model_init == "scratch":
         model_config = AutoConfig.from_pretrained(configs.model_id)
@@ -709,6 +710,8 @@ def main(cfg: DictConfig):
             "project": str(configs.experiment_name),
             "name": str(experiment_signature),
             "group": str(experiment_signature),
+            "id": experiment_signature,  # Use signature for unique W&B run per config
+            "resume": "allow",  # Resume if run exists, create new if not
         }
         if wandb_entity:
             wandb_kwargs["entity"] = wandb_entity

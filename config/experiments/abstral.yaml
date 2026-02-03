@@ -12,6 +12,7 @@ model:
     n_embd: 128
     n_head: 4
     n_layer: 2
+    use_mlp: true
 
 method:
   abstral: true

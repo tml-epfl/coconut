@@ -1,7 +1,10 @@
 model_id: multihop_reasoner
 model_init: scratch
 model_config_overrides:
-  use_mlp: false
+  n_embd: 256
+  n_layer: 3
+  n_head: 4
+  use_mlp: true
   max_position_embeddings: 1024
 
 # Custom tokenizer path (set to use a smaller vocabulary tokenizer)
