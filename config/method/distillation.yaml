@@ -5,6 +5,8 @@ no_cot: false
 reversed: false
 multi: false
 abstral: false
+abstral_subsample: true
+abstral_shuffle: true
 distillation: true
 
 # Teacher model path for distillation (should point to a checkpoint file)
