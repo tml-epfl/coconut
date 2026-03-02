@@ -871,19 +871,32 @@ def main(cfg: DictConfig):
             configs_train["num_chains"] = -1 if configs.multi else 1
             del configs_train["online"]
 
-    base_dataset_valid, base_dataset_train = None, None
-    if not (configs.data_type == "synthetic" and configs.dataset.get("online", True)):
-        _generate_dataset(
-            configs.val_path,
-            epoch=configs.resume,
-            teacher=teacher,
-            distillation_config=distillation_config,
-            names_list=names_list,
-            entities_list=entities_list,
-            **configs_valid,
-        )
-        question_val, answers_val, cot_val = _load_val_gt(configs)
+        if not configs.dataset.get("online", True):
+            _generate_dataset(
+                configs.val_path,
+                epoch=configs.resume,
+                teacher=teacher,
+                distillation_config=distillation_config,
+                names_list=names_list,
+                entities_list=entities_list,
+                **configs_valid,
+            )
+            if not configs.only_eval:
+                _generate_dataset(
+                    configs.train_path,
+                    epoch=configs.resume,
+                    teacher=teacher,
+                    distillation_config=distillation_config,
+                    names_list=names_list,
+                    entities_list=entities_list,
+                    **configs_train,
+                )
 
+    base_dataset_valid, base_dataset_train = None, None
+    question_val, answers_val, cot_val = None, None, None
+
+    if not configs.data_type == "synthetic" or configs.dataset.get("online", False):
+        question_val, answers_val, cot_val = _load_val_gt(configs)
         base_dataset_valid = get_dataset(
             configs.val_path,
             tokenizer,
@@ -895,15 +908,6 @@ def main(cfg: DictConfig):
         )
 
         if not configs.only_eval:
-            _generate_dataset(
-                configs.train_path,
-                epoch=configs.resume,
-                teacher=teacher,
-                distillation_config=distillation_config,
-                names_list=names_list,
-                entities_list=entities_list,
-                **configs_train,
-            )
             base_dataset_train = get_dataset(
                 configs.train_path,
                 tokenizer,
@@ -978,11 +982,11 @@ def main(cfg: DictConfig):
 
         data_stage = (
             0
-            if configs.dataset.get("epochs_per_length", False) == 0
+            if not (configs.data_type == "synthetic") or configs.dataset.get("epochs_per_length", False) == 0
             else epoch // configs.dataset.get("epochs_per_length")
         )
         scheduled_stage = (
-            0 if (configs.cot or configs.no_cot) else epoch // configs.epochs_per_stage
+            0 if (not (configs.data_type == "synthetic") or (configs.cot or configs.no_cot)) else epoch // configs.epochs_per_stage
         )
 
         dataset_loss_val = get_cot_latent_dataset(
