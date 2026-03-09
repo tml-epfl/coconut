@@ -524,6 +524,72 @@ def get_statistics(file: str) -> None:
     plt.tight_layout()
     plt.show()
 
+    # Print the number of states over the length of trajectories
+    print("\n === Number of states for correct trajectories: === \n")
+    num_states = {i: [] for i in range(max(num_edges)+1)}
+    for d in data:
+        if "graph" in d:
+            graph_data = d["graph"]
+        else:
+            graph_data = d
+
+        nodes = list(range(len(graph_data["idx_to_symbol"])))
+        edges = [
+            [edge[-1] for edge in graph_data["edges"] if edge[0] == node]
+            for node in nodes
+        ]
+
+        graph = DAG(nodes, [-1 for _ in nodes], edges)
+        paths = graph.get_paths_between(
+            graph_data["root"], graph_data["target"]
+        )
+        for j in num_states:
+            num_states[j].append(len(list(set([path[j] for path in paths if len(path) > j]))))
+
+    for j in num_states:
+        if max(num_states[j]) == 0:
+            continue
+
+        mean = np.mean(num_states[j])
+        var = np.var(num_states[j])
+        print(f"Step {j}: {mean:.2f} ± {var:.2f}")
+
+    # Print the number of states for BFS
+    print("\n === Number of states for BFS: === \n")
+    num_states = {i: [] for i in range(max(num_edges)+1)}
+    for d in data:
+        if "graph" in d:
+            graph_data = d["graph"]
+        else:
+            graph_data = d
+
+        nodes = list(range(len(graph_data["idx_to_symbol"])))
+        edges = [
+            [edge[-1] for edge in graph_data["edges"] if edge[0] == node]
+            for node in nodes
+        ]
+
+        graph = DAG(nodes, [-1 for _ in nodes], edges)
+        start = graph_data["root"]
+
+        old_count, index = 0, 0
+        accessed_nodes = set([start])
+        while old_count < len(accessed_nodes):
+            num_states[index].append(len(accessed_nodes))
+            old_count = len(accessed_nodes)
+
+            for node in list(accessed_nodes):
+                for n in graph.edges[node]:
+                    accessed_nodes.add(n)
+            index += 1
+
+    for j in num_states:
+        if len(num_states[j]) == 0:
+            continue
+
+        mean = np.mean(num_states[j])
+        var = np.var(num_states[j])
+        print(f"Step {j}: {mean:.2f} ± {var:.2f}")
 
 def read_names_and_entities(
     max_names: int = 0, max_entities: int = 0
